@@ -475,7 +475,8 @@ namespace chdr
 	}
 
 	// ReadProcessMemory implementation - allows byte arrays.
-	void Process_t::Read(LPCVOID m_ReadAddress, std::uint8_t* m_pBuffer, std::size_t m_nBufferSize)
+	template <typename S>
+	void Process_t::Read(LPCVOID m_ReadAddress, S& m_pBuffer, std::size_t m_nBufferSize)
 	{
 		if (!ReadProcessMemory(this->m_hTargetProcessHandle, m_ReadAddress, &m_pBuffer, m_nBufferSize, NULL))
 		{
@@ -582,15 +583,18 @@ namespace chdr
 			this->m_dSavedExportVirtualAddress, this->m_dSavedExportSize);
 
 		this->m_pExportDirectory = CH_R_CAST<PIMAGE_EXPORT_DIRECTORY>(CH_R_CAST<ULONG_PTR>(m_ImageBuffer) + chdr::misc::RvaToOffset(this->m_pNTHeaders, this->m_dSavedExportVirtualAddress));
-		{ // Export table parsing.
+		this->m_dExportedFunctionCount = this->m_pExportDirectory->NumberOfNames;
 
+		if (this->m_dExportedFunctionCount)
+		{ 
+			// Export table parsing.
 			WORD* m_pOrdinalAddress = CH_R_CAST<WORD*>(this->m_pExportDirectory->AddressOfNameOrdinals + CH_R_CAST<uintptr_t>(this->m_pExportDirectory) - this->m_dSavedExportVirtualAddress);
 			DWORD* m_pNamesAddress = CH_R_CAST<DWORD*>(this->m_pExportDirectory->AddressOfNames + CH_R_CAST<uintptr_t>(this->m_pExportDirectory) - this->m_dSavedExportVirtualAddress);
 			DWORD* m_pFunctionAddress = CH_R_CAST<DWORD*>(this->m_pExportDirectory->AddressOfFunctions + CH_R_CAST<uintptr_t>(this->m_pExportDirectory) - this->m_dSavedExportVirtualAddress);
 
-			for (int i = 0; i < this->m_pExportDirectory->NumberOfNames; ++i)
+			for (int i = 0; i < this->m_dExportedFunctionCount; ++i)
 			{
-				char* m_szExportName = reinterpret_cast<char*>(m_pNamesAddress[i] + reinterpret_cast<uintptr_t>(this->m_pExportDirectory) - m_dSavedExportVirtualAddress);
+				char* m_szExportName = CH_R_CAST<char*>(m_pNamesAddress[i] + CH_R_CAST<uintptr_t>(this->m_pExportDirectory) - m_dSavedExportVirtualAddress);
 				this->m_ExportData.push_back({ m_szExportName, m_pFunctionAddress[m_pOrdinalAddress[i]], m_pOrdinalAddress[i] });
 			}
 		}
@@ -612,6 +616,53 @@ namespace chdr
 
 		IMAGE_DOS_HEADER m_pDOSHeadersTemporary = m_Process.Read<IMAGE_DOS_HEADER>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress));
 		this->m_pDOSHeaders = &m_pDOSHeadersTemporary;
+
+		IMAGE_NT_HEADERS m_NTHeadersTemporary = m_Process.Read<IMAGE_NT_HEADERS>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + (DWORD)this->m_pDOSHeaders->e_lfanew));
+		this->m_pNTHeaders = &m_NTHeadersTemporary;
+
+
+		IMAGE_SECTION_HEADER m_SectionHeadersTemporary = m_Process.Read<IMAGE_SECTION_HEADER>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_pDOSHeadersTemporary.e_lfanew + sizeof(IMAGE_NT_HEADERS)));
+		this->m_pSectionHeaders = &m_SectionHeadersTemporary;
+		this->m_pFileHeaders = &m_pNTHeaders->FileHeader;
+
+		for (UINT i = 0; i < this->m_pFileHeaders->NumberOfSections; ++i)
+		{
+			IMAGE_SECTION_HEADER m_CurrentSectionHeader = m_Process.Read<IMAGE_SECTION_HEADER>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress +
+				m_pDOSHeadersTemporary.e_lfanew + sizeof(IMAGE_NT_HEADERS) + (i * sizeof(IMAGE_SECTION_HEADER))));
+
+			this->m_SectionData.push_back(
+				{ CH_R_CAST<char*>(m_CurrentSectionHeader.Name),
+				m_CurrentSectionHeader.VirtualAddress,
+				m_CurrentSectionHeader.Misc.VirtualSize }
+			);
+		}
+		
+		this->m_dSavedExportVirtualAddress = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
+		this->m_dSavedExportSize = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
+
+		CH_ASSERT(true, this->m_dSavedExportVirtualAddress || this->m_dSavedExportSize,
+			"Export table didn't exist for current buffer. 0x%x | 0X%x",
+			this->m_dSavedExportVirtualAddress, this->m_dSavedExportSize);
+
+		IMAGE_EXPORT_DIRECTORY m_pExportDirectoryTemporary = m_Process.Read<IMAGE_EXPORT_DIRECTORY>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + this->m_dSavedExportVirtualAddress));
+		this->m_pExportDirectory = &m_pExportDirectoryTemporary;
+
+		this->m_dExportedFunctionCount = this->m_pExportDirectory->NumberOfNames;
+		if (this->m_dExportedFunctionCount)
+		{
+			// Export table parsing.
+			for (int i = 0; i < this->m_dExportedFunctionCount; ++i)
+			{
+				char m_szExportName[MAX_PATH];
+				m_Process.Read(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_Process.Read<std::uint32_t>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + this->m_pExportDirectory->AddressOfNames + (i * 4)))), m_szExportName, sizeof(m_szExportName));
+				m_szExportName[MAX_PATH - 1] = '\0';
+
+				const std::uint16_t m_dOrdinalNumber = m_Process.Read<std::uint16_t>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + this->m_pExportDirectory->AddressOfNameOrdinals + (i * 2)));
+				const std::uint32_t m_pFunctionAddress = m_Process.Read<std::uint32_t>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + this->m_pExportDirectory->AddressOfFunctions + (m_dOrdinalNumber * 4)));
+		
+				this->m_ExportData.push_back({ m_szExportName, m_pFunctionAddress, m_dOrdinalNumber });
+			}
+		}
 
 	}
 
@@ -946,7 +997,7 @@ namespace chdr
 
 		//	this->SetupModule_Internal(m_Process);
 	}
-
+	
 	// Setup module in process by address in processes' memory space.
 	Module_t::Module_t(chdr::Process_t& m_Process, DWORD m_dModuleBaseAddress, DWORD m_dModuleSize)
 	{
@@ -968,10 +1019,7 @@ namespace chdr
 		{
 			// Read position's data to buffer.
 			const auto m_CurrentRegionData = std::make_unique<std::uint8_t[]>(m_MemoryInformation.RegionSize);
-			m_Process.Read(
-				m_MemoryInformation.BaseAddress,
-				m_CurrentRegionData.get(),
-				m_MemoryInformation.RegionSize);
+
 
 			// Add this region's data to our local object's buffer.
 

@@ -57,6 +57,8 @@ namespace chdr
 		PIMAGE_SECTION_HEADER    m_pSectionHeaders = { 0 };
 		PIMAGE_EXPORT_DIRECTORY  m_pExportDirectory = { 0 };
 
+		DWORD					 m_dExportedFunctionCount = 0;
+
 		struct SectionData_t
 		{
 			std::string m_szSectionName = "";
@@ -68,7 +70,7 @@ namespace chdr
 		{
 			std::string m_szExportName = "";
 			DWORD		m_dExportAddress = 0;
-			WORD		m_dOrdinalNumber = 0;
+			DWORD		m_dOrdinalNumber = 0;
 		};
 
 		std::vector<SectionData_t> m_SectionData = {};
@@ -399,7 +401,9 @@ namespace chdr
 		T Read(LPCVOID m_ReadAddress);
 
 		// ReadProcessMemory implementation - allows byte arrays.
-		void Read(LPCVOID m_ReadAddress, std::uint8_t* m_pBuffer, std::size_t m_nBufferSize);
+
+		template <typename S>
+		void Read(LPCVOID m_ReadAddress, S &m_pBuffer, std::size_t m_nBufferSize);
 
 		// WriteProcessMemory implementation.
 		template<typename S>
@@ -431,7 +435,7 @@ namespace chdr
 			if (Rva < m_pSectionHeader->PointerToRawData)
 				return Rva;
 
-			for (WORD i = 0; i < m_pNTHeaders->FileHeader.NumberOfSections; i++)
+			for (WORD i = 0; i < m_pNTHeaders->FileHeader.NumberOfSections; ++i)
 			{
 				if (Rva < m_pSectionHeader[i].VirtualAddress)
 					continue;
