@@ -46,7 +46,7 @@ namespace chdr
 		PEHeaderData_t(std::uint8_t* m_ImageBuffer, std::size_t m_ImageSize);
 
 		// Parsing data out of this image's process.
-		PEHeaderData_t(Process_t& m_Process);
+		PEHeaderData_t(Process_t& m_Process, DWORD m_dCustomBaseAddress = NULL);
 		
 		// Parsing data out of this image's module.
 		PEHeaderData_t(Module_t& m_Module);

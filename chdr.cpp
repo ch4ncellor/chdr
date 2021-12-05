@@ -609,9 +609,9 @@ namespace chdr
 
 	// TODO:
 	// Parsing data out of this image's process.
-	PEHeaderData_t::PEHeaderData_t(Process_t& m_Process)
+	PEHeaderData_t::PEHeaderData_t(Process_t& m_Process, DWORD m_dCustomBaseAddress)
 	{
-		const DWORD m_dProcessBaseAddress = m_Process.GetBaseAddress();
+		const DWORD m_dProcessBaseAddress = m_dCustomBaseAddress != NULL ? m_dCustomBaseAddress : m_Process.GetBaseAddress();
 		CH_ASSERT(true, m_dProcessBaseAddress, "Couldn't find base address of target process.");
 
 		IMAGE_DOS_HEADER m_pDOSHeadersTemporary = m_Process.Read<IMAGE_DOS_HEADER>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress));
@@ -619,7 +619,6 @@ namespace chdr
 
 		IMAGE_NT_HEADERS m_NTHeadersTemporary = m_Process.Read<IMAGE_NT_HEADERS>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + (DWORD)this->m_pDOSHeaders->e_lfanew));
 		this->m_pNTHeaders = &m_NTHeadersTemporary;
-
 
 		IMAGE_SECTION_HEADER m_SectionHeadersTemporary = m_Process.Read<IMAGE_SECTION_HEADER>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_pDOSHeadersTemporary.e_lfanew + sizeof(IMAGE_NT_HEADERS)));
 		this->m_pSectionHeaders = &m_SectionHeadersTemporary;
