@@ -37,28 +37,6 @@ namespace chdr
 	// For easy and organized PE header parsing.
 	class PEHeaderData_t
 	{
-	public:
-
-		// Default ctor
-		PEHeaderData_t() { }
-
-		// Parsing data out of this image's buffer.
-		PEHeaderData_t(std::uint8_t* m_ImageBuffer, std::size_t m_ImageSize);
-
-		// Parsing data out of this image's process.
-		PEHeaderData_t(Process_t& m_Process, DWORD m_dCustomBaseAddress = NULL);
-		
-		// Parsing data out of this image's module.
-		PEHeaderData_t(Module_t& m_Module);
-
-		PIMAGE_DOS_HEADER        m_pDOSHeaders = { 0 };
-		PIMAGE_NT_HEADERS        m_pNTHeaders = { 0 };
-		PIMAGE_FILE_HEADER       m_pFileHeaders = { 0 };
-		PIMAGE_SECTION_HEADER    m_pSectionHeaders = { 0 };
-		PIMAGE_EXPORT_DIRECTORY  m_pExportDirectory = { 0 };
-
-		DWORD					 m_dExportedFunctionCount = 0;
-
 		struct SectionData_t
 		{
 			std::string m_szSectionName = "";
@@ -73,23 +51,59 @@ namespace chdr
 			DWORD		m_dOrdinalNumber = 0;
 		};
 
-		std::vector<SectionData_t> m_SectionData = {};
-		std::vector<ExportData_t> m_ExportData = {};
-
-	private:
+		// Needed export table data.
 		DWORD m_dSavedExportVirtualAddress = 0;
 		DWORD m_dSavedExportSize = 0;
 
+		// Needed import table data.
+		DWORD m_dSavedImportVirtualAddress = 0;
+		DWORD m_dSavedImportSize = 0;
+
+		// For caching desired data.
+		std::vector<SectionData_t> m_SectionData = {};
+		std::vector<ExportData_t> m_ExportData = {};
+
+		PIMAGE_DOS_HEADER        m_pDOSHeaders = { 0 };
+		PIMAGE_NT_HEADERS        m_pNTHeaders = { 0 };
+		PIMAGE_FILE_HEADER       m_pFileHeaders = { 0 };
+		PIMAGE_SECTION_HEADER    m_pSectionHeaders = { 0 };
+		PIMAGE_EXPORT_DIRECTORY  m_pExportDirectory = { 0 };
+
+		DWORD					 m_dExportedFunctionCount = 0;
 	public:
 
-		// Traverses through every exported function in a module.
-		void TraverseExportTable();
+		// Default ctor
+		PEHeaderData_t() { }
+
+		// Parsing data out of this image's buffer.
+		PEHeaderData_t(std::uint8_t* m_ImageBuffer, std::size_t m_ImageSize);
+
+		// Parsing data out of this image's process.
+		PEHeaderData_t(Process_t& m_Process, DWORD m_dCustomBaseAddress = NULL);
+		
+		// Parsing data out of this image's module.
+		PEHeaderData_t(Module_t& m_Module);
+
+	public:
+
+		// Helper function to get DOS header of PE image.
+		PIMAGE_DOS_HEADER GetDOSHeader();
+
+		// Helper function to get NT headers of PE image.
+		PIMAGE_NT_HEADERS GetNTHeader();
+
+		// Helper function to get section data of PE image.
+		std::vector<SectionData_t> GetSectionData();
+
+		// Helper function to get exported functions' data of PE image.
+		std::vector<ExportData_t> GetExportData();
 
 	};
 
 	// PE Image utility helpers
 	class ImageFile_t
 	{
+		PEHeaderData_t m_PEHeaderData = { };
 	public:
 
 		// Used for parsing PE's from file.
@@ -99,15 +113,14 @@ namespace chdr
 		ImageFile_t(std::uint8_t* m_ImageBuffer, std::size_t m_nImageSize);
 
 	public:
-		std::string    m_szImageFileName = "";
-		std::string    m_szImageFilePath = "";
-		PEHeaderData_t m_PEHeaderData = { };
 		ByteArray_t    m_ImageBuffer;
-
 	public:
 		
 		// Ensure we found the target PE image.
 		bool IsValid();
+
+		// Helper function to get PE header data of PE image.
+		PEHeaderData_t GetPEHeaderData();
 
 		// Writes data in local buffer to file.
 		void WriteToFile(const char* m_szFilePath);
@@ -280,13 +293,13 @@ namespace chdr
 			ARCHITECTURE_MAXIMUM = ARCHITECTURE_x86 + 1
 		};
 
+	private:
 		PEHeaderData_t m_PEHeaderData = { };
 
 		// Basic process information.
 		HANDLE m_hTargetProcessHandle = { 0 };
 		DWORD  m_nTargetProcessID = 0;
 
-	private:
 		// For saving off this processes' architecture type.
 		eProcessArchitecture m_eProcessArchitecture = eProcessArchitecture::ARCHITECTURE_UNKNOWN;
 
@@ -344,6 +357,9 @@ namespace chdr
 
 		// Helper function to get architecture of target process. 
 		eProcessArchitecture GetProcessArchitecture();
+
+		// Helper function to get PE header data of target process.
+		PEHeaderData_t GetPEHeaderData();
 
 		// Helper function to get filesystem path of target process.
 		std::string GetPath();

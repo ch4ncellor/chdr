@@ -169,6 +169,12 @@ namespace chdr
 		return this->m_eProcessArchitecture;
 	}
 
+	// Helper function to get PE header data of target process.
+	PEHeaderData_t Process_t::GetPEHeaderData()
+	{
+		return this->m_PEHeaderData;
+	}
+
 	// Did we suspend the target process ourselves?
 	bool Process_t::IsManuallySuspended()
 	{
@@ -579,7 +585,7 @@ namespace chdr
 		this->m_dSavedExportSize = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
 
 		CH_ASSERT(true, this->m_dSavedExportVirtualAddress || this->m_dSavedExportSize,
-			"Export table didn't exist for current buffer. 0x%x | 0X%x",
+			"Export table didn't exist for current region. 0x%x | 0X%x",
 			this->m_dSavedExportVirtualAddress, this->m_dSavedExportSize);
 
 		this->m_pExportDirectory = CH_R_CAST<PIMAGE_EXPORT_DIRECTORY>(CH_R_CAST<ULONG_PTR>(m_ImageBuffer) + chdr::misc::RvaToOffset(this->m_pNTHeaders, this->m_dSavedExportVirtualAddress));
@@ -598,6 +604,13 @@ namespace chdr
 				this->m_ExportData.push_back({ m_szExportName, m_pFunctionAddress[m_pOrdinalAddress[i]], m_pOrdinalAddress[i] });
 			}
 		}
+
+		this->m_dSavedImportVirtualAddress = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
+		this->m_dSavedImportSize = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size;
+
+		CH_ASSERT(true, this->m_dSavedImportVirtualAddress || this->m_dSavedImportSize,
+			"Import table didn't exist for current region. 0x%x | 0X%x",
+			this->m_dSavedImportVirtualAddress, this->m_dSavedImportSize);
 
 		{ // Import table parsing.
 
@@ -663,6 +676,17 @@ namespace chdr
 			}
 		}
 
+		this->m_dSavedImportVirtualAddress = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
+		this->m_dSavedImportSize = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size;
+
+		CH_ASSERT(true, this->m_dSavedImportVirtualAddress || this->m_dSavedImportSize,
+			"Import table didn't exist for current region. 0x%x | 0X%x",
+			this->m_dSavedImportVirtualAddress, this->m_dSavedImportSize);
+
+		{ // Import table parsing.
+
+		} 
+
 	}
 
 	// TODO:
@@ -671,11 +695,28 @@ namespace chdr
 	{
 	}
 
-	// TODO:
-	// Traverses through every exported function in a module.
-	void PEHeaderData_t::TraverseExportTable()
+	// Get DOS header of target PE header.
+	PIMAGE_DOS_HEADER PEHeaderData_t::GetDOSHeader()
 	{
+		return this->m_pDOSHeaders;
+	}
 
+	// Get NT header of target PE header.
+	PIMAGE_NT_HEADERS PEHeaderData_t::GetNTHeader()
+	{
+		return this->m_pNTHeaders;
+	}
+
+	// Get section data of target PE header.
+	std::vector<PEHeaderData_t::SectionData_t> PEHeaderData_t::GetSectionData()
+	{
+		return this->m_SectionData;
+	}
+
+	// Get export data of target PE header.
+	std::vector<PEHeaderData_t::ExportData_t> PEHeaderData_t::GetExportData()
+	{
+		return this->m_ExportData;
 	}
 }
 
@@ -691,12 +732,6 @@ namespace chdr
 		std::ifstream m_fFile(m_szImagePath.c_str(), std::ios::binary);
 		(&m_ImageBuffer)->assign((std::istreambuf_iterator<char>(m_fFile)), std::istreambuf_iterator<char>());
 		m_fFile.close();
-
-		// Entire image path.
-		this->m_szImageFilePath = m_szImagePath;
-
-		// Cherrypick file name&extension.
-		this->m_szImageFileName = m_szImagePath.substr(m_szImagePath.find_last_of("/\\") + 1);
 
 		// Parse PE header information.
 		m_PEHeaderData = PEHeaderData_t((&m_ImageBuffer)->data(), (&m_ImageBuffer)->size());
@@ -717,6 +752,12 @@ namespace chdr
 	bool ImageFile_t::IsValid()
 	{
 		return this->m_ImageBuffer.size() != 0;
+	}
+
+	// Helper function to get PE header data of PE image.
+	PEHeaderData_t ImageFile_t::GetPEHeaderData()
+	{
+		return this->m_PEHeaderData;
 	}
 
 	void ImageFile_t::WriteToFile(const char* m_szFilePath)
