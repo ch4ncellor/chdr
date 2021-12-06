@@ -51,6 +51,12 @@ namespace chdr
 			DWORD		m_dOrdinalNumber = 0;
 		};
 
+		struct ImportData_t
+		{
+			std::string m_szModuleName = "";
+			std::string m_szImportName = "";
+		};
+
 		// Needed export table data.
 		DWORD m_dSavedExportVirtualAddress = 0;
 		DWORD m_dSavedExportSize = 0;
@@ -62,12 +68,12 @@ namespace chdr
 		// For caching desired data.
 		std::vector<SectionData_t> m_SectionData = {};
 		std::vector<ExportData_t> m_ExportData = {};
+		std::vector<ImportData_t> m_ImportData = {};
 
 		PIMAGE_DOS_HEADER        m_pDOSHeaders = { 0 };
 		PIMAGE_NT_HEADERS        m_pNTHeaders = { 0 };
 		PIMAGE_FILE_HEADER       m_pFileHeaders = { 0 };
 		PIMAGE_SECTION_HEADER    m_pSectionHeaders = { 0 };
-		PIMAGE_EXPORT_DIRECTORY  m_pExportDirectory = { 0 };
 
 		DWORD					 m_dExportedFunctionCount = 0;
 	public:
@@ -80,9 +86,6 @@ namespace chdr
 
 		// Parsing data out of this image's process.
 		PEHeaderData_t(Process_t& m_Process, DWORD m_dCustomBaseAddress = NULL);
-		
-		// Parsing data out of this image's module.
-		PEHeaderData_t(Module_t& m_Module);
 
 	public:
 
@@ -97,6 +100,9 @@ namespace chdr
 
 		// Helper function to get exported functions' data of PE image.
 		std::vector<ExportData_t> GetExportData();
+
+		// Helper function to get imported functions' data of PE image.
+		std::vector<ImportData_t> GetImportData();
 
 	};
 
@@ -445,31 +451,6 @@ namespace chdr
 
 	namespace misc
 	{
-		inline DWORD RvaToOffset(PIMAGE_NT_HEADERS m_pNTHeaders, DWORD Rva)
-		{
-			PIMAGE_SECTION_HEADER m_pSectionHeader = IMAGE_FIRST_SECTION(m_pNTHeaders);
-			if (Rva < m_pSectionHeader->PointerToRawData)
-				return Rva;
-
-			for (WORD i = 0; i < m_pNTHeaders->FileHeader.NumberOfSections; ++i)
-			{
-				if (Rva < m_pSectionHeader[i].VirtualAddress)
-					continue;
-
-				DWORD Limit = m_pSectionHeader[i].SizeOfRawData ? m_pSectionHeader[i].SizeOfRawData : m_pSectionHeader[i].Misc.VirtualSize;
-				if (Rva >= m_pSectionHeader[i].VirtualAddress + Limit)
-					continue;
-
-				if (m_pSectionHeader[i].PointerToRawData == 0)
-					return Rva;
-
-				DWORD Offset = Rva;
-				Offset -= m_pSectionHeader[i].VirtualAddress;
-				Offset += m_pSectionHeader[i].PointerToRawData;
-
-				return Offset;
-			}
-			return NULL;
-		}
+		DWORD RvaToOffset(PIMAGE_NT_HEADERS m_pNTHeaders, DWORD Rva);
 	}
 }

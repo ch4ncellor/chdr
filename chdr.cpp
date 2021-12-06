@@ -584,23 +584,22 @@ namespace chdr
 		this->m_dSavedExportVirtualAddress = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
 		this->m_dSavedExportSize = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
 
-		CH_ASSERT(true, this->m_dSavedExportVirtualAddress || this->m_dSavedExportSize,
-			"Export table didn't exist for current region. 0x%x | 0X%x",
-			this->m_dSavedExportVirtualAddress, this->m_dSavedExportSize);
+		if (!this->m_dSavedExportVirtualAddress || !this->m_dSavedExportSize)
+		{
+			CH_LOG("Export table didn't exist for current region. 0x%x | 0X%x",	this->m_dSavedExportVirtualAddress, this->m_dSavedExportSize);
+		}
+		else // Export table parsing.
+		{
+			const PIMAGE_EXPORT_DIRECTORY m_pExportDirectory = CH_R_CAST<PIMAGE_EXPORT_DIRECTORY>(CH_R_CAST<ULONG_PTR>(m_ImageBuffer) + chdr::misc::RvaToOffset(this->m_pNTHeaders, this->m_dSavedExportVirtualAddress));
+			this->m_dExportedFunctionCount = m_pExportDirectory->NumberOfNames;
 
-		this->m_pExportDirectory = CH_R_CAST<PIMAGE_EXPORT_DIRECTORY>(CH_R_CAST<ULONG_PTR>(m_ImageBuffer) + chdr::misc::RvaToOffset(this->m_pNTHeaders, this->m_dSavedExportVirtualAddress));
-		this->m_dExportedFunctionCount = this->m_pExportDirectory->NumberOfNames;
-
-		if (this->m_dExportedFunctionCount)
-		{ 
-			// Export table parsing.
-			WORD* m_pOrdinalAddress = CH_R_CAST<WORD*>(this->m_pExportDirectory->AddressOfNameOrdinals + CH_R_CAST<uintptr_t>(this->m_pExportDirectory) - this->m_dSavedExportVirtualAddress);
-			DWORD* m_pNamesAddress = CH_R_CAST<DWORD*>(this->m_pExportDirectory->AddressOfNames + CH_R_CAST<uintptr_t>(this->m_pExportDirectory) - this->m_dSavedExportVirtualAddress);
-			DWORD* m_pFunctionAddress = CH_R_CAST<DWORD*>(this->m_pExportDirectory->AddressOfFunctions + CH_R_CAST<uintptr_t>(this->m_pExportDirectory) - this->m_dSavedExportVirtualAddress);
+			WORD* m_pOrdinalAddress = CH_R_CAST<WORD*>(m_pExportDirectory->AddressOfNameOrdinals + CH_R_CAST<uintptr_t>(m_pExportDirectory) - this->m_dSavedExportVirtualAddress);
+			DWORD* m_pNamesAddress = CH_R_CAST<DWORD*>(m_pExportDirectory->AddressOfNames + CH_R_CAST<uintptr_t>(m_pExportDirectory) - this->m_dSavedExportVirtualAddress);
+			DWORD* m_pFunctionAddress = CH_R_CAST<DWORD*>(m_pExportDirectory->AddressOfFunctions + CH_R_CAST<uintptr_t>(m_pExportDirectory) - this->m_dSavedExportVirtualAddress);
 
 			for (int i = 0; i < this->m_dExportedFunctionCount; ++i)
 			{
-				char* m_szExportName = CH_R_CAST<char*>(m_pNamesAddress[i] + CH_R_CAST<uintptr_t>(this->m_pExportDirectory) - m_dSavedExportVirtualAddress);
+				char* m_szExportName = CH_R_CAST<char*>(m_pNamesAddress[i] + CH_R_CAST<uintptr_t>(m_pExportDirectory) - m_dSavedExportVirtualAddress);
 				this->m_ExportData.push_back({ m_szExportName, m_pFunctionAddress[m_pOrdinalAddress[i]], m_pOrdinalAddress[i] });
 			}
 		}
@@ -608,19 +607,50 @@ namespace chdr
 		this->m_dSavedImportVirtualAddress = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
 		this->m_dSavedImportSize = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size;
 
-		CH_ASSERT(true, this->m_dSavedImportVirtualAddress || this->m_dSavedImportSize,
-			"Import table didn't exist for current region. 0x%x | 0X%x",
-			this->m_dSavedImportVirtualAddress, this->m_dSavedImportSize);
+		if (!this->m_dSavedImportVirtualAddress || !this->m_dSavedImportSize)
+		{
+			CH_LOG("Import table didn't exist for current region. 0x%x | 0X%x",	this->m_dSavedImportVirtualAddress, this->m_dSavedImportSize);
+		}
+		else // Import table parsing.
+		{
+			PIMAGE_IMPORT_DESCRIPTOR m_pImportDescriptor = CH_R_CAST<PIMAGE_IMPORT_DESCRIPTOR>(CH_R_CAST<ULONG_PTR>(m_ImageBuffer) + chdr::misc::RvaToOffset(this->m_pNTHeaders, this->m_dSavedImportVirtualAddress));
 
-		{ // Import table parsing.
+			while (m_pImportDescriptor->Name)
+			{
+				// Read module name.
+				char* m_szModuleName = CH_R_CAST<char*>(CH_R_CAST<ULONG_PTR>(m_ImageBuffer) + chdr::misc::RvaToOffset(this->m_pNTHeaders, m_pImportDescriptor->Name));
 
+				std::size_t m_nThunkOffset = m_pImportDescriptor->OriginalFirstThunk ? m_pImportDescriptor->OriginalFirstThunk : m_pImportDescriptor->FirstThunk;
+				PIMAGE_THUNK_DATA m_pThunkData = CH_R_CAST<PIMAGE_THUNK_DATA>(CH_R_CAST<ULONG_PTR>(m_ImageBuffer) + chdr::misc::RvaToOffset(this->m_pNTHeaders, m_nThunkOffset));
+
+				while (m_pThunkData->u1.AddressOfData)
+				{
+					if (!(m_pThunkData->u1.Ordinal & IMAGE_ORDINAL_FLAG32))
+					{
+						// Read function name.
+						char* m_szFunctionName = CH_R_CAST<char*>(CH_R_CAST<ULONG_PTR>(m_ImageBuffer) + chdr::misc::RvaToOffset(this->m_pNTHeaders, (m_pThunkData->u1.AddressOfData + 2)));
+
+						// Cache desired data.
+						this->m_ImportData.push_back({ m_szModuleName, m_szFunctionName });
+					}
+					else
+					{
+						// TODO: Exports by ordinal, dunno how I will make this nice.
+					}
+
+					// Move onto next thunk.
+					++m_pThunkData;
+				}
+
+				// Move onto next descriptor.
+				++m_pImportDescriptor;
+			}
 		}
 
 		// Ensure image PE headers was valid.
 		CH_ASSERT(false, this->m_pDOSHeaders->e_magic == IMAGE_DOS_SIGNATURE && this->m_pNTHeaders->Signature == IMAGE_NT_SIGNATURE, "Couldn't find MZ&NT header.");
 	}
 
-	// TODO:
 	// Parsing data out of this image's process.
 	PEHeaderData_t::PEHeaderData_t(Process_t& m_Process, DWORD m_dCustomBaseAddress)
 	{
@@ -652,26 +682,25 @@ namespace chdr
 		this->m_dSavedExportVirtualAddress = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
 		this->m_dSavedExportSize = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
 
-		CH_ASSERT(true, this->m_dSavedExportVirtualAddress || this->m_dSavedExportSize,
-			"Export table didn't exist for current buffer. 0x%x | 0X%x",
-			this->m_dSavedExportVirtualAddress, this->m_dSavedExportSize);
-
-		IMAGE_EXPORT_DIRECTORY m_pExportDirectoryTemporary = m_Process.Read<IMAGE_EXPORT_DIRECTORY>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + this->m_dSavedExportVirtualAddress));
-		this->m_pExportDirectory = &m_pExportDirectoryTemporary;
-
-		this->m_dExportedFunctionCount = this->m_pExportDirectory->NumberOfNames;
-		if (this->m_dExportedFunctionCount)
+		if (!this->m_dSavedExportVirtualAddress || !this->m_dSavedExportSize)
 		{
-			// Export table parsing.
+			CH_LOG("Export table didn't exist for current region. 0x%x | 0X%x", this->m_dSavedExportVirtualAddress, this->m_dSavedExportSize);
+		}
+		else // Export table parsing.
+		{
+			IMAGE_EXPORT_DIRECTORY m_pExportDirectory = m_Process.Read<IMAGE_EXPORT_DIRECTORY>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + this->m_dSavedExportVirtualAddress));
+			this->m_dExportedFunctionCount = m_pExportDirectory.NumberOfNames;
+
 			for (int i = 0; i < this->m_dExportedFunctionCount; ++i)
 			{
 				char m_szExportName[MAX_PATH];
-				m_Process.Read(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_Process.Read<std::uint32_t>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + this->m_pExportDirectory->AddressOfNames + (i * 4)))), m_szExportName, sizeof(m_szExportName));
+				m_Process.Read(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_Process.Read<std::uint32_t>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_pExportDirectory.AddressOfNames + (i * 4)))), m_szExportName, sizeof(m_szExportName));
 				m_szExportName[MAX_PATH - 1] = '\0';
 
-				const std::uint16_t m_dOrdinalNumber = m_Process.Read<std::uint16_t>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + this->m_pExportDirectory->AddressOfNameOrdinals + (i * 2)));
-				const std::uint32_t m_pFunctionAddress = m_Process.Read<std::uint32_t>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + this->m_pExportDirectory->AddressOfFunctions + (m_dOrdinalNumber * 4)));
+				const std::uint16_t m_dOrdinalNumber = m_Process.Read<std::uint16_t>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_pExportDirectory.AddressOfNameOrdinals + (i * 2)));
+				const std::uint32_t m_pFunctionAddress = m_Process.Read<std::uint32_t>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_pExportDirectory.AddressOfFunctions + (m_dOrdinalNumber * 4)));
 		
+				// Cache desired data.
 				this->m_ExportData.push_back({ m_szExportName, m_pFunctionAddress, m_dOrdinalNumber });
 			}
 		}
@@ -679,44 +708,83 @@ namespace chdr
 		this->m_dSavedImportVirtualAddress = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
 		this->m_dSavedImportSize = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size;
 
-		CH_ASSERT(true, this->m_dSavedImportVirtualAddress || this->m_dSavedImportSize,
-			"Import table didn't exist for current region. 0x%x | 0X%x",
-			this->m_dSavedImportVirtualAddress, this->m_dSavedImportSize);
+		if (!this->m_dSavedImportVirtualAddress || !this->m_dSavedImportSize)
+		{
+			CH_LOG("Import table didn't exist for current region. 0x%x | 0X%x", this->m_dSavedImportVirtualAddress, this->m_dSavedImportSize);
+		}
+		else // Import table parsing.
+		{ 
+			DWORD m_dDescriptorOffset = this->m_dSavedImportVirtualAddress;
+			IMAGE_IMPORT_DESCRIPTOR m_pImportDescriptor = m_Process.Read<IMAGE_IMPORT_DESCRIPTOR>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_dDescriptorOffset));
 
-		{ // Import table parsing.
+			while (m_pImportDescriptor.Name)
+			{
+				// Read module name.
+				char m_szModuleName[MAX_PATH];
+				m_Process.Read(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_pImportDescriptor.Name), m_szModuleName, sizeof(m_szModuleName));
+				m_szModuleName[MAX_PATH - 1] = '\0';
 
-		} 
+				std::size_t m_nThunkOffset = m_pImportDescriptor.OriginalFirstThunk ? m_pImportDescriptor.OriginalFirstThunk : m_pImportDescriptor.FirstThunk;
+				IMAGE_THUNK_DATA m_pThunkData = m_Process.Read<IMAGE_THUNK_DATA>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_nThunkOffset));
+
+				while (m_pThunkData.u1.AddressOfData)
+				{
+					if (!(m_pThunkData.u1.Ordinal & IMAGE_ORDINAL_FLAG32))
+					{
+						// Read function name.
+						char m_szFunctionName[MAX_PATH];
+						m_Process.Read(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + (m_pThunkData.u1.AddressOfData + 2)), m_szFunctionName, sizeof(m_szFunctionName));
+						m_szFunctionName[MAX_PATH - 1] = '\0';
+
+						// Cache desired data.
+						this->m_ImportData.push_back({ m_szModuleName, m_szFunctionName });
+					}
+					else
+					{
+						// TODO: Exports by ordinal, dunno how I will make this nice.
+					}
+
+					// Move onto next thunk.
+					m_nThunkOffset += sizeof(IMAGE_THUNK_DATA32);
+					m_pThunkData = m_Process.Read<IMAGE_THUNK_DATA>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_nThunkOffset));
+				}
+
+				// Move onto next descriptor.
+				m_dDescriptorOffset += sizeof(IMAGE_IMPORT_DESCRIPTOR);
+				m_pImportDescriptor = m_Process.Read<IMAGE_IMPORT_DESCRIPTOR>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_dDescriptorOffset));
+			}
+		}
 
 	}
 
-	// TODO:
-	// Parsing data out of this image's module.
-	PEHeaderData_t::PEHeaderData_t(Module_t& m_Module)
-	{
-	}
-
-	// Get DOS header of target PE header.
+	// Helper function to get DOS header of PE image.
 	PIMAGE_DOS_HEADER PEHeaderData_t::GetDOSHeader()
 	{
 		return this->m_pDOSHeaders;
 	}
 
-	// Get NT header of target PE header.
+	// Helper function to get NT headers of PE image.
 	PIMAGE_NT_HEADERS PEHeaderData_t::GetNTHeader()
 	{
 		return this->m_pNTHeaders;
 	}
 
-	// Get section data of target PE header.
+	// Helper function to get section data of PE image.
 	std::vector<PEHeaderData_t::SectionData_t> PEHeaderData_t::GetSectionData()
 	{
 		return this->m_SectionData;
 	}
 
-	// Get export data of target PE header.
+	// Helper function to get exported functions' data of PE image.
 	std::vector<PEHeaderData_t::ExportData_t> PEHeaderData_t::GetExportData()
 	{
 		return this->m_ExportData;
+	}
+
+	// Helper function to get imported functions' data of PE image.
+	std::vector<PEHeaderData_t::ImportData_t> PEHeaderData_t::GetImportData()
+	{
+		return this->m_ImportData;
 	}
 }
 
@@ -1072,5 +1140,40 @@ namespace chdr
 	bool Module_t::IsValid()
 	{
 		return this->m_ModuleData.size() != 0;
+	}
+}
+
+// Miscelleanous functions.
+namespace chdr
+{
+	namespace misc
+	{
+		// Convert relative virtual address to file offset.
+		DWORD RvaToOffset(PIMAGE_NT_HEADERS m_pNTHeaders, DWORD Rva)
+		{
+			PIMAGE_SECTION_HEADER m_pSectionHeader = IMAGE_FIRST_SECTION(m_pNTHeaders);
+			if (Rva < m_pSectionHeader->PointerToRawData)
+				return Rva;
+
+			for (WORD i = 0; i < m_pNTHeaders->FileHeader.NumberOfSections; ++i)
+			{
+				if (Rva < m_pSectionHeader[i].VirtualAddress)
+					continue;
+
+				DWORD Limit = m_pSectionHeader[i].SizeOfRawData ? m_pSectionHeader[i].SizeOfRawData : m_pSectionHeader[i].Misc.VirtualSize;
+				if (Rva >= m_pSectionHeader[i].VirtualAddress + Limit)
+					continue;
+
+				if (m_pSectionHeader[i].PointerToRawData == 0)
+					return Rva;
+
+				DWORD Offset = Rva;
+				Offset -= m_pSectionHeader[i].VirtualAddress;
+				Offset += m_pSectionHeader[i].PointerToRawData;
+
+				return Offset;
+			}
+			return NULL;
+		}
 	}
 }
