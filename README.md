@@ -11,6 +11,6 @@ Cheddar 🧀 is a lightweight library geared towards windows process hacking/man
  ---
   
 <p align="center">
-This is currently a WIP, contributions&issues are welcomed.
+This is currently an early WIP, contributions&issues are welcomed.
   </p>
  
