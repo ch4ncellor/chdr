@@ -64,15 +64,7 @@ namespace chdr
 			std::string m_szModuleName = "";
 			std::string m_szImportName = "";
 		};
-
-		// Needed export table data.
-		DWORD m_dSavedExportVirtualAddress = 0;
-		DWORD m_dSavedExportSize = 0;
-
-		// Needed import table data.
-		DWORD m_dSavedImportVirtualAddress = 0;
-		DWORD m_dSavedImportSize = 0;
-
+		
 		// For caching desired data.
 		std::vector<SectionData_t> m_SectionData = {};
 		std::vector<ExportData_t> m_ExportData = {};

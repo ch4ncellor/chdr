@@ -571,6 +571,9 @@ namespace chdr
 		this->m_pDOSHeaders = CH_R_CAST<PIMAGE_DOS_HEADER>(m_ImageBuffer);
 		this->m_pNTHeaders = CH_R_CAST<PIMAGE_NT_HEADERS>(CH_R_CAST<ULONG_PTR>(m_ImageBuffer) + this->m_pDOSHeaders->e_lfanew);
 
+		// Ensure image PE headers was valid.
+		CH_ASSERT(true, this->m_pDOSHeaders->e_magic == IMAGE_DOS_SIGNATURE && this->m_pNTHeaders->Signature == IMAGE_NT_SIGNATURE, "Couldn't find MZ&NT header.");
+
 		this->m_pSectionHeaders = IMAGE_FIRST_SECTION(this->m_pNTHeaders);
 		this->m_pFileHeaders = &m_pNTHeaders->FileHeader;
 
@@ -581,21 +584,21 @@ namespace chdr
 				this->m_pSectionHeaders->Misc.VirtualSize }
 		);
 
-		this->m_dSavedExportVirtualAddress = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
-		this->m_dSavedExportSize = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
+		const DWORD m_dSavedExportVirtualAddress= this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
+		const DWORD m_dSavedExportSize = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
 
-		if (!this->m_dSavedExportVirtualAddress || !this->m_dSavedExportSize)
+		if (!m_dSavedExportVirtualAddress|| !m_dSavedExportSize)
 		{
-			CH_LOG("Export table didn't exist for current region. 0x%x | 0X%x",	this->m_dSavedExportVirtualAddress, this->m_dSavedExportSize);
+			CH_LOG("Export table didn't exist for current region. 0x%x | 0X%x",	m_dSavedExportVirtualAddress, m_dSavedExportSize);
 		}
 		else // Export table parsing.
 		{
-			const PIMAGE_EXPORT_DIRECTORY m_pExportDirectory = CH_R_CAST<PIMAGE_EXPORT_DIRECTORY>(CH_R_CAST<ULONG_PTR>(m_ImageBuffer) + chdr::misc::RvaToOffset(this->m_pNTHeaders, this->m_dSavedExportVirtualAddress));
+			const PIMAGE_EXPORT_DIRECTORY m_pExportDirectory = CH_R_CAST<PIMAGE_EXPORT_DIRECTORY>(CH_R_CAST<ULONG_PTR>(m_ImageBuffer) + chdr::misc::RvaToOffset(this->m_pNTHeaders, m_dSavedExportVirtualAddress));
 			this->m_dExportedFunctionCount = m_pExportDirectory->NumberOfNames;
 
-			WORD* m_pOrdinalAddress = CH_R_CAST<WORD*>(m_pExportDirectory->AddressOfNameOrdinals + CH_R_CAST<uintptr_t>(m_pExportDirectory) - this->m_dSavedExportVirtualAddress);
-			DWORD* m_pNamesAddress = CH_R_CAST<DWORD*>(m_pExportDirectory->AddressOfNames + CH_R_CAST<uintptr_t>(m_pExportDirectory) - this->m_dSavedExportVirtualAddress);
-			DWORD* m_pFunctionAddress = CH_R_CAST<DWORD*>(m_pExportDirectory->AddressOfFunctions + CH_R_CAST<uintptr_t>(m_pExportDirectory) - this->m_dSavedExportVirtualAddress);
+			WORD* m_pOrdinalAddress = CH_R_CAST<WORD*>(m_pExportDirectory->AddressOfNameOrdinals + CH_R_CAST<uintptr_t>(m_pExportDirectory) - m_dSavedExportVirtualAddress);
+			DWORD* m_pNamesAddress = CH_R_CAST<DWORD*>(m_pExportDirectory->AddressOfNames + CH_R_CAST<uintptr_t>(m_pExportDirectory) - m_dSavedExportVirtualAddress);
+			DWORD* m_pFunctionAddress = CH_R_CAST<DWORD*>(m_pExportDirectory->AddressOfFunctions + CH_R_CAST<uintptr_t>(m_pExportDirectory) - m_dSavedExportVirtualAddress);
 
 			for (int i = 0; i < this->m_dExportedFunctionCount; ++i)
 			{
@@ -604,16 +607,16 @@ namespace chdr
 			}
 		}
 
-		this->m_dSavedImportVirtualAddress = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
-		this->m_dSavedImportSize = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size;
+		const DWORD m_dSavedImportVirtualAddress = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
+		const DWORD m_dSavedImportSize = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size;
 
-		if (!this->m_dSavedImportVirtualAddress || !this->m_dSavedImportSize)
+		if (!m_dSavedImportVirtualAddress || !m_dSavedImportSize)
 		{
-			CH_LOG("Import table didn't exist for current region. 0x%x | 0X%x",	this->m_dSavedImportVirtualAddress, this->m_dSavedImportSize);
+			CH_LOG("Import table didn't exist for current region. 0x%x | 0X%x",	m_dSavedImportVirtualAddress, m_dSavedImportSize);
 		}
 		else // Import table parsing.
 		{
-			PIMAGE_IMPORT_DESCRIPTOR m_pImportDescriptor = CH_R_CAST<PIMAGE_IMPORT_DESCRIPTOR>(CH_R_CAST<ULONG_PTR>(m_ImageBuffer) + chdr::misc::RvaToOffset(this->m_pNTHeaders, this->m_dSavedImportVirtualAddress));
+			PIMAGE_IMPORT_DESCRIPTOR m_pImportDescriptor = CH_R_CAST<PIMAGE_IMPORT_DESCRIPTOR>(CH_R_CAST<ULONG_PTR>(m_ImageBuffer) + chdr::misc::RvaToOffset(this->m_pNTHeaders, m_dSavedImportVirtualAddress));
 
 			while (m_pImportDescriptor->Name)
 			{
@@ -635,7 +638,7 @@ namespace chdr
 					}
 					else
 					{
-						// TODO: Exports by ordinal, dunno how I will make this nice.
+						// TODO: Imports by ordinal, dunno how I will make this nice.
 					}
 
 					// Move onto next thunk.
@@ -646,9 +649,6 @@ namespace chdr
 				++m_pImportDescriptor;
 			}
 		}
-
-		// Ensure image PE headers was valid.
-		CH_ASSERT(false, this->m_pDOSHeaders->e_magic == IMAGE_DOS_SIGNATURE && this->m_pNTHeaders->Signature == IMAGE_NT_SIGNATURE, "Couldn't find MZ&NT header.");
 	}
 
 	// Parsing data out of this image's process.
@@ -662,6 +662,9 @@ namespace chdr
 
 		IMAGE_NT_HEADERS m_NTHeadersTemporary = m_Process.Read<IMAGE_NT_HEADERS>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + (DWORD)this->m_pDOSHeaders->e_lfanew));
 		this->m_pNTHeaders = &m_NTHeadersTemporary;
+
+		// Ensure image PE headers was valid.
+		CH_ASSERT(true, this->m_pDOSHeaders->e_magic == IMAGE_DOS_SIGNATURE && this->m_pNTHeaders->Signature == IMAGE_NT_SIGNATURE, "Couldn't find MZ&NT header.");
 
 		IMAGE_SECTION_HEADER m_SectionHeadersTemporary = m_Process.Read<IMAGE_SECTION_HEADER>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_pDOSHeadersTemporary.e_lfanew + sizeof(IMAGE_NT_HEADERS)));
 		this->m_pSectionHeaders = &m_SectionHeadersTemporary;
@@ -679,16 +682,16 @@ namespace chdr
 			);
 		}
 		
-		this->m_dSavedExportVirtualAddress = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
-		this->m_dSavedExportSize = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
+		const DWORD m_dSavedExportVirtualAddress = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
+		const DWORD m_dSavedExportSize = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
 
-		if (!this->m_dSavedExportVirtualAddress || !this->m_dSavedExportSize)
+		if (!m_dSavedExportVirtualAddress || !m_dSavedExportSize)
 		{
-			CH_LOG("Export table didn't exist for current region. 0x%x | 0X%x", this->m_dSavedExportVirtualAddress, this->m_dSavedExportSize);
+			CH_LOG("Export table didn't exist for current region. 0x%x | 0X%x",m_dSavedExportVirtualAddress,m_dSavedExportSize);
 		}
 		else // Export table parsing.
 		{
-			IMAGE_EXPORT_DIRECTORY m_pExportDirectory = m_Process.Read<IMAGE_EXPORT_DIRECTORY>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + this->m_dSavedExportVirtualAddress));
+			IMAGE_EXPORT_DIRECTORY m_pExportDirectory = m_Process.Read<IMAGE_EXPORT_DIRECTORY>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_dSavedExportVirtualAddress));
 			this->m_dExportedFunctionCount = m_pExportDirectory.NumberOfNames;
 
 			for (int i = 0; i < this->m_dExportedFunctionCount; ++i)
@@ -705,16 +708,16 @@ namespace chdr
 			}
 		}
 
-		this->m_dSavedImportVirtualAddress = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
-		this->m_dSavedImportSize = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size;
+		const DWORD	m_dSavedImportVirtualAddress = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
+		const DWORD m_dSavedImportSize = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size;
 
-		if (!this->m_dSavedImportVirtualAddress || !this->m_dSavedImportSize)
+		if (!m_dSavedImportVirtualAddress || !m_dSavedImportSize)
 		{
-			CH_LOG("Import table didn't exist for current region. 0x%x | 0X%x", this->m_dSavedImportVirtualAddress, this->m_dSavedImportSize);
+			CH_LOG("Import table didn't exist for current region. 0x%x | 0X%x", m_dSavedImportVirtualAddress, m_dSavedImportSize);
 		}
 		else // Import table parsing.
 		{ 
-			DWORD m_dDescriptorOffset = this->m_dSavedImportVirtualAddress;
+			DWORD m_dDescriptorOffset = m_dSavedImportVirtualAddress;
 			IMAGE_IMPORT_DESCRIPTOR m_pImportDescriptor = m_Process.Read<IMAGE_IMPORT_DESCRIPTOR>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_dDescriptorOffset));
 
 			while (m_pImportDescriptor.Name)
@@ -741,7 +744,7 @@ namespace chdr
 					}
 					else
 					{
-						// TODO: Exports by ordinal, dunno how I will make this nice.
+						// TODO: Imports by ordinal, dunno how I will make this nice.
 					}
 
 					// Move onto next thunk.
