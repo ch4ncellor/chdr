@@ -11,12 +11,20 @@
 
 namespace chdr
 {
-	// Shitty global switch to log errors/verbose information.
-	static bool SHOULD_PRINT_DEBUG_LOGS = true;
+	
+#if 1
+#define SHOULD_PRINT_DEBUG_LOGS // Log errors/verbose information.
+#endif
 
+#ifdef SHOULD_PRINT_DEBUG_LOGS
 	// Custom debug assert/log.
-#define CH_ASSERT(x, b, s, ...) if (!(b)) { if (SHOULD_PRINT_DEBUG_LOGS) {  if (s) { std::printf("[!] "); printf_s(s, __VA_ARGS__); std::printf("\n"); } } if (x) return;  }
+#define CH_ASSERT(x, b, s, ...) if (!(b)) {  if (s) { std::printf("[!] "); printf_s(s, __VA_ARGS__); std::printf("\n"); } if (x) return;  }
 #define CH_LOG(s, ...) std::printf("[!] "); std::printf(s, __VA_ARGS__); std::printf("\n");
+#else
+	// Custom debug assert/log.
+#define CH_ASSERT(x, b, s, ...) if (!(b)) { if (x) return;  }
+#define CH_LOG(s, ...) (void)0
+#endif
 
 	// Custom casting macros, because fucking C++ style casts are just TOO long.
 #define CH_R_CAST reinterpret_cast
