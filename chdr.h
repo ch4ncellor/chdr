@@ -8,7 +8,7 @@
 #include <comdef.h>
 #include <Psapi.h>
 #include <filesystem>
-
+ 
 namespace chdr
 {
 	
@@ -18,7 +18,7 @@ namespace chdr
 
 #ifdef SHOULD_PRINT_DEBUG_LOGS
 	// Custom debug assert/log.
-#define CH_ASSERT(x, b, s, ...) if (!(b)) {  if (s) { std::printf("[!] "); printf_s(s, __VA_ARGS__); std::printf("\n"); } if (x) return;  }
+#define CH_ASSERT(x, b, s, ...) if (!(b)) {  if (s) { std::printf("[!] "); printf_s(s, __VA_ARGS__); std::printf("\n"); } if constexpr (x) return;  }
 #define CH_LOG(s, ...) std::printf("[!] "); std::printf(s, __VA_ARGS__); std::printf("\n");
 #else
 	// Custom debug assert/log.
@@ -270,10 +270,10 @@ namespace chdr
 		Process_t() { }
 
 		// Get target proces by name.
-		Process_t(const wchar_t* m_wszProcessName);
+		Process_t(const wchar_t* m_wszProcessName, DWORD m_dDesiredAccess = NULL);
 
 		// Get target proces by PID.
-		Process_t(DWORD m_nProcessID);
+		Process_t(DWORD m_nProcessID, DWORD m_dDesiredAccess = NULL);
 
 		// Get target proces by HANDLE.
 		Process_t(HANDLE m_hProcessHandle);

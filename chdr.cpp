@@ -4,7 +4,7 @@
 namespace chdr
 {
 	// Get target proces by name.
-	Process_t::Process_t(const wchar_t* m_wszProcessName)
+	Process_t::Process_t(const wchar_t* m_wszProcessName, DWORD m_dDesiredAccess)
 	{
 		HANDLE m_hSnapShot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, NULL);
 
@@ -17,7 +17,7 @@ namespace chdr
 				continue;
 
 			this->m_nTargetProcessID = entry.th32ProcessID;
-			this->m_hTargetProcessHandle = OpenProcess(PROCESS_ALL_ACCESS, false, this->m_nTargetProcessID);
+			this->m_hTargetProcessHandle = OpenProcess(m_dDesiredAccess != NULL ? m_dDesiredAccess : PROCESS_ALL_ACCESS, false, this->m_nTargetProcessID);
 			break;
 		}
 
@@ -36,10 +36,10 @@ namespace chdr
 	}
 
 	// Get target proces by PID.
-	Process_t::Process_t(DWORD m_nProcessID)
+	Process_t::Process_t(DWORD m_nProcessID, DWORD m_dDesiredAccess)
 	{
 		this->m_nTargetProcessID = m_nProcessID;
-		this->m_hTargetProcessHandle = OpenProcess(PROCESS_ALL_ACCESS, false, this->m_nTargetProcessID);
+		this->m_hTargetProcessHandle = OpenProcess(m_dDesiredAccess != NULL ? m_dDesiredAccess : PROCESS_ALL_ACCESS, false, this->m_nTargetProcessID);
 
 		CH_ASSERT(true, this->m_hTargetProcessHandle && this->m_hTargetProcessHandle != INVALID_HANDLE_VALUE,
 			"Couldn't obtain valid HANDLE for PID %i", m_nProcessID);
@@ -600,7 +600,7 @@ namespace chdr
 			DWORD* m_pNamesAddress = CH_R_CAST<DWORD*>(m_pExportDirectory->AddressOfNames + CH_R_CAST<uintptr_t>(m_pExportDirectory) - m_dSavedExportVirtualAddress);
 			DWORD* m_pFunctionAddress = CH_R_CAST<DWORD*>(m_pExportDirectory->AddressOfFunctions + CH_R_CAST<uintptr_t>(m_pExportDirectory) - m_dSavedExportVirtualAddress);
 
-			for (int i = 0; i < this->m_dExportedFunctionCount; ++i)
+			for (DWORD i = 0; i < this->m_dExportedFunctionCount; ++i)
 			{
 				char* m_szExportName = CH_R_CAST<char*>(m_pNamesAddress[i] + CH_R_CAST<uintptr_t>(m_pExportDirectory) - m_dSavedExportVirtualAddress);
 				this->m_ExportData.push_back({ m_szExportName, m_pFunctionAddress[m_pOrdinalAddress[i]], m_pOrdinalAddress[i] });
@@ -694,7 +694,7 @@ namespace chdr
 			IMAGE_EXPORT_DIRECTORY m_pExportDirectory = m_Process.Read<IMAGE_EXPORT_DIRECTORY>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_dSavedExportVirtualAddress));
 			this->m_dExportedFunctionCount = m_pExportDirectory.NumberOfNames;
 
-			for (int i = 0; i < this->m_dExportedFunctionCount; ++i)
+			for (DWORD i = 0; i < this->m_dExportedFunctionCount; ++i)
 			{
 				char m_szExportName[MAX_PATH];
 				m_Process.Read(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_Process.Read<std::uint32_t>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_pExportDirectory.AddressOfNames + (i * 4)))), m_szExportName, sizeof(m_szExportName));
@@ -1088,21 +1088,17 @@ namespace chdr
 	// Setup module in process by (non-case sensitive) name. 
 	Module_t::Module_t(chdr::Process_t& m_Process, const char* m_szModuleName)
 	{
-		try
+
+		// Walk all loaded modules until we land on the wish module.
+		for (auto& CurrentModule : m_Process.EnumerateModules())
 		{
-			// Walk all loaded modules until we land on the wish module.
-			for (auto& CurrentModule : m_Process.EnumerateModules())
-			{
-				if (strcmp(CurrentModule.m_szModuleName.c_str(), m_szModuleName) != 0)
-					continue;
+			if (strcmp(CurrentModule.m_szModuleName.c_str(), m_szModuleName) != 0)
+				continue;
 
-				this->m_dModuleBaseAddress = CurrentModule.m_dModuleBaseAddress;
-				this->m_dModuleSize = CurrentModule.m_dModuleSize;
-				break; // Found what we needed, exit loop.
-			}
+			this->m_dModuleBaseAddress = CurrentModule.m_dModuleBaseAddress;
+			this->m_dModuleSize = CurrentModule.m_dModuleSize;
+			break; // Found what we needed, exit loop.
 		}
-		catch (...) {}
-
 
 		CH_ASSERT(true, this->m_dModuleBaseAddress && this->m_dModuleSize, "Couldn't find desired module %s", m_szModuleName);
 
