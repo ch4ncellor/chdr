@@ -198,6 +198,48 @@ namespace chdr
 		return m_bIsProcessSuspended;
 	}
 
+	// Is the target process running under a debugger?
+	bool Process_t::IsBeingDebugged()
+	{
+		BOOL m_bHasRemoteDebugger = FALSE;
+		CheckRemoteDebuggerPresent(this->m_hTargetProcessHandle, &m_bHasRemoteDebugger);
+
+		if (m_bHasRemoteDebugger)
+			return true;
+
+		const PEB m_PEB = this->GetPEB();
+		if (m_PEB.BeingDebugged)
+			return true;
+
+		return false;
+	}
+
+	// The PEB of the target process.
+	PEB Process_t::GetPEB()
+	{
+		const HMODULE m_hNTDLL = GetModuleHandleA("ntdll.dll");
+		if (!m_hNTDLL)
+		{
+			CH_LOG("Couldn't find loaded module ntdll!");
+			return {};
+		}
+
+		NtQueryInformationProcess_fn NtQueryInformationProcess = CH_R_CAST<NtQueryInformationProcess_fn>(GetProcAddress(m_hNTDLL, "NtQueryInformationProcess"));
+		PROCESS_BASIC_INFORMATION m_ProcessBasicInformation;
+
+		// Get address where PEB resides in this target process.
+		if (NtQueryInformationProcess(this->m_hTargetProcessHandle, PROCESSINFOCLASS::ProcessBasicInformation,
+			&m_ProcessBasicInformation, sizeof(PROCESS_BASIC_INFORMATION), nullptr) != 0x00000000/*STATUS_SUCCESS*/)
+		{
+			CH_LOG("NtQueryInformationProcess failure!");
+			return {};
+		}
+
+		// Read PEB from found base address.
+		const PEB m_PEB = this->Read<PEB>(CH_R_CAST<LPCVOID>(m_ProcessBasicInformation.PebBaseAddress));
+		return m_PEB;
+	}
+
 	// Internal manual map function.
 	bool Process_t::ManualMapInject_Internal(std::uint8_t* m_ImageBuffer, std::size_t m_nImageSize, eManualMapInjectionFlags m_eInjectionFlags)
 	{
@@ -572,24 +614,27 @@ namespace chdr
 		this->m_pNTHeaders = CH_R_CAST<PIMAGE_NT_HEADERS>(CH_R_CAST<ULONG_PTR>(m_ImageBuffer) + this->m_pDOSHeaders->e_lfanew);
 
 		// Ensure image PE headers was valid.
-		CH_ASSERT(true, this->m_pDOSHeaders->e_magic == IMAGE_DOS_SIGNATURE && this->m_pNTHeaders->Signature == IMAGE_NT_SIGNATURE, "Couldn't find MZ&NT header.");
+		CH_ASSERT(true, this->IsValid(), "Couldn't find MZ&NT header.");
 
-		this->m_pSectionHeaders = IMAGE_FIRST_SECTION(this->m_pNTHeaders);
-		this->m_pFileHeaders = &m_pNTHeaders->FileHeader;
-
-		for (UINT i = 0; i != this->m_pFileHeaders->NumberOfSections; ++i, ++this->m_pSectionHeaders)
+		PIMAGE_SECTION_HEADER m_pSectionHeaders = IMAGE_FIRST_SECTION(this->m_pNTHeaders);
+		for (UINT i = 0; i != m_pNTHeaders->FileHeader.NumberOfSections; ++i)
+		{
 			this->m_SectionData.push_back(
-				{ CH_R_CAST<char*>(this->m_pSectionHeaders->Name),
-				this->m_pSectionHeaders->VirtualAddress,
-				this->m_pSectionHeaders->Misc.VirtualSize }
-		);
+				{ CH_R_CAST<char*>(m_pSectionHeaders->Name),
+				m_pSectionHeaders->VirtualAddress,
+				m_pSectionHeaders->Misc.VirtualSize }
+			);
 
-		const DWORD m_dSavedExportVirtualAddress= this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
+			// Move onto next section.
+			++m_pSectionHeaders;
+		}
+
+		const DWORD m_dSavedExportVirtualAddress = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
 		const DWORD m_dSavedExportSize = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
 
-		if (!m_dSavedExportVirtualAddress|| !m_dSavedExportSize)
+		if (!m_dSavedExportVirtualAddress || !m_dSavedExportSize)
 		{
-			CH_LOG("Export table didn't exist for current region. 0x%x | 0X%x",	m_dSavedExportVirtualAddress, m_dSavedExportSize);
+			CH_LOG("Export table didn't exist for current region. 0x%x | 0X%x", m_dSavedExportVirtualAddress, m_dSavedExportSize);
 		}
 		else // Export table parsing.
 		{
@@ -612,7 +657,7 @@ namespace chdr
 
 		if (!m_dSavedImportVirtualAddress || !m_dSavedImportSize)
 		{
-			CH_LOG("Import table didn't exist for current region. 0x%x | 0X%x",	m_dSavedImportVirtualAddress, m_dSavedImportSize);
+			CH_LOG("Import table didn't exist for current region. 0x%X | 0x%X", m_dSavedImportVirtualAddress, m_dSavedImportSize);
 		}
 		else // Import table parsing.
 		{
@@ -660,34 +705,33 @@ namespace chdr
 		IMAGE_DOS_HEADER m_pDOSHeadersTemporary = m_Process.Read<IMAGE_DOS_HEADER>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress));
 		this->m_pDOSHeaders = &m_pDOSHeadersTemporary;
 
-		IMAGE_NT_HEADERS m_NTHeadersTemporary = m_Process.Read<IMAGE_NT_HEADERS>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + (DWORD)this->m_pDOSHeaders->e_lfanew));
+		IMAGE_NT_HEADERS m_NTHeadersTemporary = m_Process.Read<IMAGE_NT_HEADERS>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + this->m_pDOSHeaders->e_lfanew));
 		this->m_pNTHeaders = &m_NTHeadersTemporary;
 
 		// Ensure image PE headers was valid.
-		CH_ASSERT(true, this->m_pDOSHeaders->e_magic == IMAGE_DOS_SIGNATURE && this->m_pNTHeaders->Signature == IMAGE_NT_SIGNATURE, "Couldn't find MZ&NT header.");
+		CH_ASSERT(true, this->IsValid(), "Couldn't find MZ&NT header.");
 
-		IMAGE_SECTION_HEADER m_SectionHeadersTemporary = m_Process.Read<IMAGE_SECTION_HEADER>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_pDOSHeadersTemporary.e_lfanew + sizeof(IMAGE_NT_HEADERS)));
-		this->m_pSectionHeaders = &m_SectionHeadersTemporary;
-		this->m_pFileHeaders = &m_pNTHeaders->FileHeader;
-
-		for (UINT i = 0; i < this->m_pFileHeaders->NumberOfSections; ++i)
+		for (UINT i = 0; i < m_pNTHeaders->FileHeader.NumberOfSections; ++i)
 		{
-			IMAGE_SECTION_HEADER m_CurrentSectionHeader = m_Process.Read<IMAGE_SECTION_HEADER>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress +
-				m_pDOSHeadersTemporary.e_lfanew + sizeof(IMAGE_NT_HEADERS) + (i * sizeof(IMAGE_SECTION_HEADER))));
+			static std::size_t m_nSectionOffset = sizeof(IMAGE_NT_HEADERS);
+			IMAGE_SECTION_HEADER m_pSectionHeaders = m_Process.Read<IMAGE_SECTION_HEADER>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + this->m_pDOSHeaders->e_lfanew + m_nSectionOffset));
 
 			this->m_SectionData.push_back(
-				{ CH_R_CAST<char*>(m_CurrentSectionHeader.Name),
-				m_CurrentSectionHeader.VirtualAddress,
-				m_CurrentSectionHeader.Misc.VirtualSize }
+				{ CH_R_CAST<char*>(m_pSectionHeaders.Name),
+				m_pSectionHeaders.VirtualAddress,
+				m_pSectionHeaders.Misc.VirtualSize }
 			);
+
+			// Move onto next section.
+			m_nSectionOffset += sizeof(IMAGE_SECTION_HEADER);
 		}
-		
+
 		const DWORD m_dSavedExportVirtualAddress = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
 		const DWORD m_dSavedExportSize = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
 
 		if (!m_dSavedExportVirtualAddress || !m_dSavedExportSize)
 		{
-			CH_LOG("Export table didn't exist for current region. 0x%x | 0X%x",m_dSavedExportVirtualAddress,m_dSavedExportSize);
+			CH_LOG("Export table didn't exist for current region. 0x%x | 0X%x", m_dSavedExportVirtualAddress, m_dSavedExportSize);
 		}
 		else // Export table parsing.
 		{
@@ -702,7 +746,7 @@ namespace chdr
 
 				const std::uint16_t m_dOrdinalNumber = m_Process.Read<std::uint16_t>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_pExportDirectory.AddressOfNameOrdinals + (i * 2)));
 				const std::uint32_t m_pFunctionAddress = m_Process.Read<std::uint32_t>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_pExportDirectory.AddressOfFunctions + (m_dOrdinalNumber * 4)));
-		
+
 				// Cache desired data.
 				this->m_ExportData.push_back({ m_szExportName, m_pFunctionAddress, m_dOrdinalNumber });
 			}
@@ -713,10 +757,10 @@ namespace chdr
 
 		if (!m_dSavedImportVirtualAddress || !m_dSavedImportSize)
 		{
-			CH_LOG("Import table didn't exist for current region. 0x%x | 0X%x", m_dSavedImportVirtualAddress, m_dSavedImportSize);
+			CH_LOG("Import table didn't exist for current region. 0x%X | 0x%X", m_dSavedImportVirtualAddress, m_dSavedImportSize);
 		}
 		else // Import table parsing.
-		{ 
+		{
 			DWORD m_dDescriptorOffset = m_dSavedImportVirtualAddress;
 			IMAGE_IMPORT_DESCRIPTOR m_pImportDescriptor = m_Process.Read<IMAGE_IMPORT_DESCRIPTOR>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_dDescriptorOffset));
 
@@ -758,6 +802,12 @@ namespace chdr
 			}
 		}
 
+	}
+
+	// Ensure we found the target PE header.
+	bool PEHeaderData_t::IsValid()
+	{
+		return this->m_pDOSHeaders->e_magic == IMAGE_DOS_SIGNATURE && this->m_pNTHeaders->Signature == IMAGE_NT_SIGNATURE;
 	}
 
 	// Helper function to get DOS header of PE image.
@@ -1104,7 +1154,7 @@ namespace chdr
 
 		//	this->SetupModule_Internal(m_Process);
 	}
-	
+
 	// Setup module in process by address in processes' memory space.
 	Module_t::Module_t(chdr::Process_t& m_Process, DWORD m_dModuleBaseAddress, DWORD m_dModuleSize)
 	{
