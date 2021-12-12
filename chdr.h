@@ -110,6 +110,9 @@ namespace chdr
 
 		// Convert relative virtual address to file offset.
 		DWORD RvaToOffset(DWORD Rva);
+
+		// Convert file offset to relative virtual address.
+		DWORD OffsetToRva(DWORD Rva);
 	};
 
 	// PE Image utility helpers

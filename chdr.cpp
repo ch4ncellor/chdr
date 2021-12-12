@@ -701,6 +701,18 @@ namespace chdr
 		}
 	}
 
+	DWORD PEHeaderData_t::OffsetToRva(DWORD offset) 
+	{
+		PIMAGE_SECTION_HEADER m_pSectionHeader = IMAGE_FIRST_SECTION(this->m_pNTHeaders);
+		for (int i = 0; i < this->m_pNTHeaders->FileHeader.NumberOfSections; i++) 
+		{
+			if (offset >= m_pSectionHeader[i].PointerToRawData &&
+				offset < m_pSectionHeader[i].PointerToRawData + m_pSectionHeader[i].SizeOfRawData) {
+				return m_pSectionHeader[i].VirtualAddress + (offset - m_pSectionHeader[i].PointerToRawData);
+			}
+		}
+		return 0;
+	}
 	// Parsing data out of this image's process.
 	PEHeaderData_t::PEHeaderData_t(Process_t& m_Process, DWORD m_dCustomBaseAddress)
 	{
@@ -741,18 +753,23 @@ namespace chdr
 			this->m_dExportedFunctionCount = m_pExportDirectory.NumberOfNames;
 
 			// Read whole RVA block.
-			const auto m_RVABlock = std::make_unique<DWORD[]>(this->m_dExportedFunctionCount * sizeof(DWORD));
-			m_Process.Read(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_pExportDirectory.AddressOfFunctions), m_RVABlock.get(), this->m_dExportedFunctionCount * sizeof(DWORD));
+			const auto m_RVABlock = std::make_unique<DWORD[]>(m_pExportDirectory.NumberOfFunctions * sizeof(DWORD));
+			m_Process.Read(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_pExportDirectory.AddressOfFunctions), m_RVABlock.get(), m_pExportDirectory.NumberOfFunctions * sizeof(DWORD));
+
+			// Read whole name block.
+			const auto m_NameBlock = std::make_unique<DWORD[]>(this->m_dExportedFunctionCount * sizeof(DWORD));
+			m_Process.Read(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_pExportDirectory.AddressOfNames), m_NameBlock.get(), this->m_dExportedFunctionCount * sizeof(DWORD));
 
 			// Read whole ordinal block.
-			const auto m_OrdinalBlock = std::make_unique<WORD[]>(m_pExportDirectory.NumberOfNames * sizeof(WORD));
-			m_Process.Read(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_pExportDirectory.AddressOfNameOrdinals), m_OrdinalBlock.get(), m_pExportDirectory.NumberOfNames * sizeof(DWORD));
+			const auto m_OrdinalBlock = std::make_unique<WORD[]>(this->m_dExportedFunctionCount * sizeof(WORD));
+			m_Process.Read(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_pExportDirectory.AddressOfNameOrdinals), m_OrdinalBlock.get(), this->m_dExportedFunctionCount * sizeof(WORD));
 
 			// Ye.
 			PDWORD m_pRVABlock = m_RVABlock.get();
+			PDWORD m_pNameBlock = m_NameBlock.get();
 			PWORD m_pOrdinalBlock = m_OrdinalBlock.get();
 
-			for (DWORD i = 0; i < this->m_dExportedFunctionCount; i++)
+			for (int i = 0; i < this->m_dExportedFunctionCount; i++)
 			{
 				const WORD m_OrdinalNr = m_pOrdinalBlock[i];
 				if (m_OrdinalNr > this->m_dExportedFunctionCount)
@@ -760,7 +777,7 @@ namespace chdr
 					continue;
 
 				char m_szExportName[MAX_PATH];
-				m_Process.Read(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_Process.Read<DWORD>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_pExportDirectory.AddressOfNames + (i * sizeof(DWORD))))), m_szExportName, sizeof(m_szExportName));
+				m_Process.Read(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_pNameBlock[i]), m_szExportName, sizeof(m_szExportName));
 				m_szExportName[MAX_PATH - 1] = '\0';
 
 				// Cache desired data.
