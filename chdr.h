@@ -12,7 +12,7 @@
 
 namespace chdr
 {
-	
+
 #if 1
 #define SHOULD_PRINT_DEBUG_LOGS // Log errors/verbose information.
 #endif
@@ -56,7 +56,7 @@ namespace chdr
 		struct ExportData_t
 		{
 			std::string m_szExportName = "";
-			DWORD		m_dExportAddress = 0;
+			uint32_t		m_dExportAddress = 0;
 			DWORD		m_dOrdinalNumber = 0;
 		};
 
@@ -65,7 +65,7 @@ namespace chdr
 			std::string m_szModuleName = "";
 			std::string m_szImportName = "";
 		};
-		
+
 		// For caching desired data.
 		std::vector<SectionData_t> m_SectionData = { };
 		std::vector<ExportData_t> m_ExportData = { };
@@ -75,6 +75,8 @@ namespace chdr
 		PIMAGE_NT_HEADERS        m_pNTHeaders = { 0 };
 
 		DWORD					 m_dExportedFunctionCount = 0;
+
+		bool					 m_bIsValidInternal = false;
 	public:
 
 		// Default ctor
@@ -106,6 +108,8 @@ namespace chdr
 		// Helper function to get imported functions' data of PE image.
 		std::vector<ImportData_t> GetImportData();
 
+		// Convert relative virtual address to file offset.
+		DWORD RvaToOffset(DWORD Rva);
 	};
 
 	// PE Image utility helpers
@@ -124,7 +128,7 @@ namespace chdr
 		ByteArray_t    m_ImageBuffer;
 
 	public:
-		
+
 		// Ensure we found the target PE image.
 		bool IsValid();
 
@@ -173,14 +177,17 @@ namespace chdr
 	{
 		DWORD m_dModuleBaseAddress = NULL;
 		DWORD m_dModuleSize = NULL;
-		ByteArray_t m_ModuleData = { };
+
+		PEHeaderData_t m_PEHeaderData = { };
 
 	public:
+		ByteArray_t m_ModuleData = { };
+
 		// Default ctor
 		Module_t() { }
 
 		// Setup module in process by (non-case sensitive) name. 
-		Module_t(chdr::Process_t& m_Process, const char *m_szModuleName);
+		Module_t(chdr::Process_t& m_Process, const char* m_szModuleName);
 
 		// Setup module in process by address in process. (plz pass correct data here :D)
 		Module_t(chdr::Process_t& m_Process, DWORD m_dModuleBaseAddress, DWORD m_dModuleSize);
@@ -188,6 +195,12 @@ namespace chdr
 		// Ease of use for building constructors.
 		void SetupModule_Internal(chdr::Process_t& m_Process);
 	public:
+
+		// Helper function to get PE header data of target process.
+		PEHeaderData_t GetPEHeaderData();
+
+		// Helper function to get module data of target process.
+		ByteArray_t GetModuleData();
 
 		// Ensure we found the target module in memory.
 		bool IsValid();
@@ -251,7 +264,7 @@ namespace chdr
 		void Resume();
 
 		// Check which module this thread is associated with.
-		std::string GetOwningModule(chdr::Process_t &m_Process, DWORD m_dStartAddress);
+		std::string GetOwningModule(chdr::Process_t& m_Process, DWORD m_dStartAddress);
 
 		// Ensure we found a HANDLE to the target thread.
 		bool IsValid();
@@ -303,12 +316,16 @@ namespace chdr
 			ARCHITECTURE_MAXIMUM = ARCHITECTURE_x86 + 1
 		};
 
+		// Basic process information.
+		HANDLE m_hTargetProcessHandle = { 0 };
+		DWORD  m_nTargetProcessID = 0;
+
 	private:
 		PEHeaderData_t m_PEHeaderData = { };
 
 		// Basic process information.
-		HANDLE m_hTargetProcessHandle = { 0 };
-		DWORD  m_nTargetProcessID = 0;
+	/*	HANDLE m_hTargetProcessHandle = { 0 };
+		DWORD  m_nTargetProcessID = 0;*/
 
 		// For saving off this processes' architecture type.
 		eProcessArchitecture m_eProcessArchitecture = eProcessArchitecture::ARCHITECTURE_UNKNOWN;
@@ -440,7 +457,7 @@ namespace chdr
 			DWORD		m_dThreadID = 0;
 			DWORD		m_dThreadStartAddress = 0;
 			bool		m_bIsThreadSuspended = false;
-		//	Thread_t    m_Thread = { };		// For manipulating this thread.
+			//	Thread_t    m_Thread = { };		// For manipulating this thread.
 		};
 
 		// Relevant information pertaining a target module.
@@ -450,7 +467,7 @@ namespace chdr
 			std::string m_szModulePath = "";
 			DWORD		m_dModuleSize = 0;
 			DWORD		m_dModuleBaseAddress = 0;
-		//	Module_t    m_Module = { };		// For manipulating this module.
+			//	Module_t    m_Module = { };		// For manipulating this module.
 		};
 
 		// Caching all loaded modules in target process.
@@ -541,7 +558,7 @@ namespace chdr
 		// ReadProcessMemory implementation - allows byte arrays.
 
 		template <typename S>
-		void Read(LPCVOID m_ReadAddress, S &m_pBuffer, std::size_t m_nBufferSize);
+		std::size_t Read(LPCVOID m_ReadAddress, S m_pBuffer, std::size_t m_nBufferSize);
 
 		// WriteProcessMemory implementation.
 		template<typename S>
@@ -567,6 +584,5 @@ namespace chdr
 
 	namespace misc
 	{
-		DWORD RvaToOffset(PIMAGE_NT_HEADERS m_pNTHeaders, DWORD Rva);
 	}
 }
