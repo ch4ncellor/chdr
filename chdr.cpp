@@ -652,8 +652,14 @@ namespace chdr
 
 			for (DWORD i = 0; i < this->m_dExportedFunctionCount; ++i)
 			{
-				char* m_szExportName = CH_R_CAST<char*>(m_pNamesAddress[i] + CH_R_CAST<uintptr_t>(m_pExportDirectory) - m_dSavedExportVirtualAddress);
-				this->m_ExportData.push_back({ m_szExportName, m_pFunctionAddress[m_pOrdinalAddress[i]], m_pOrdinalAddress[i] });
+				const WORD m_CurrentOrdinal = m_pOrdinalAddress[i];
+				const DWORD m_CurrentName = m_pNamesAddress[i];
+				if (m_CurrentOrdinal < 0 || m_CurrentName <= 0 || m_CurrentOrdinal > this->m_dExportedFunctionCount)
+					// Happend a few times, dunno.
+					continue;
+
+				char* m_szExportName = CH_R_CAST<char*>(m_CurrentName + CH_R_CAST<uintptr_t>(m_pExportDirectory) - m_dSavedExportVirtualAddress);
+				this->m_ExportData.push_back({ m_szExportName, m_pFunctionAddress[m_CurrentOrdinal], m_CurrentOrdinal });
 			}
 		}
 
@@ -769,19 +775,20 @@ namespace chdr
 			PDWORD m_pNameBlock = m_NameBlock.get();
 			PWORD m_pOrdinalBlock = m_OrdinalBlock.get();
 
-			for (int i = 0; i < this->m_dExportedFunctionCount; i++)
+			for (int i = 0; i < this->m_dExportedFunctionCount; ++i)
 			{
-				const WORD m_OrdinalNr = m_pOrdinalBlock[i];
-				if (m_OrdinalNr > this->m_dExportedFunctionCount)
+				const WORD m_CurrentOrdinal = m_pOrdinalBlock[i];
+				const DWORD m_CurrentName = m_pNameBlock[i];
+				if (m_CurrentOrdinal < 0 || m_CurrentName <= 0 || m_CurrentOrdinal > this->m_dExportedFunctionCount)
 					// Happend a few times, dunno.
 					continue;
 
 				char m_szExportName[MAX_PATH];
-				m_Process.Read(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_pNameBlock[i]), m_szExportName, sizeof(m_szExportName));
+				m_Process.Read(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_CurrentName), m_szExportName, sizeof(m_szExportName));
 				m_szExportName[MAX_PATH - 1] = '\0';
 
 				// Cache desired data.
-				this->m_ExportData.push_back({ m_szExportName, m_pRVABlock[m_OrdinalNr], m_OrdinalNr });
+				this->m_ExportData.push_back({ m_szExportName, m_pRVABlock[m_CurrentOrdinal], m_CurrentOrdinal });
 			}
 		}
 
