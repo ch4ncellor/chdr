@@ -114,7 +114,7 @@ namespace chdr
 	}
 
 	// The base address of the target process.
-	DWORD Process_t::GetBaseAddress()
+	std::uintptr_t Process_t::GetBaseAddress()
 	{
 		for (auto& CurrentModule : this->EnumerateModules(true))
 		{
@@ -236,7 +236,7 @@ namespace chdr
 		}
 
 		// Read PEB from found base address.
-		const PEB m_PEB = this->Read<PEB>(CH_R_CAST<LPCVOID>(m_ProcessBasicInformation.PebBaseAddress));
+		const PEB m_PEB = this->Read<PEB>(std::uintptr_t(m_ProcessBasicInformation.PebBaseAddress));
 		return m_PEB;
 	}
 
@@ -405,7 +405,7 @@ namespace chdr
 			CloseHandle(m_hThreadHandle);
 
 			m_EnumeratedThreads.push_back(
-				{ mEntry.th32ThreadID, m_dThreadStartAddress, m_bIsThreadSuspended/*, Thread_t(mEntry.th32ThreadID)*/ }
+				{ mEntry.th32ThreadID, m_dThreadStartAddress, m_bIsThreadSuspended }
 			);
 		}
 
@@ -426,18 +426,19 @@ namespace chdr
 				return this->m_EnumeratedModulesCached;
 		}
 
-		// Wipe any previously cached data.
-		this->m_EnumeratedModulesCached.clear();
+		if (!this->m_EnumeratedModulesCached.empty())
+			// Wipe any previously cached data.
+			this->m_EnumeratedModulesCached.clear();
 
 		HANDLE m_hSnapShot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, this->m_nTargetProcessID);
 
 		MODULEENTRY32 mEntry = { 0 };
 		mEntry.dwSize = sizeof(mEntry);
 
-		while (Module32NextW(m_hSnapShot, &mEntry))
+		while (Module32Next(m_hSnapShot, &mEntry))
 		{
 			WCHAR m_wszModPath[MAX_PATH];
-			if (!K32GetModuleFileNameExW(this->m_hTargetProcessHandle, mEntry.hModule, m_wszModPath, sizeof(m_wszModPath) / sizeof(WCHAR)))
+			if (!GetModuleFileNameEx(this->m_hTargetProcessHandle, mEntry.hModule, m_wszModPath, sizeof(m_wszModPath) / sizeof(WCHAR)))
 				continue;
 
 			// Convert wstring->string.
@@ -448,7 +449,7 @@ namespace chdr
 			std::string m_szModuleName(m_bszPreModuleName);
 
 			this->m_EnumeratedModulesCached.push_back(
-				{ m_szModuleName, m_szModulePath, mEntry.modBaseSize, CH_R_CAST<DWORD>(mEntry.modBaseAddr)/*, Module_t(*this, (DWORD)mEntry.modBaseAddr, mEntry.modBaseSize)*/ }
+				{ m_szModuleName, m_szModulePath, mEntry.modBaseSize, CH_R_CAST<std::uintptr_t>(mEntry.modBaseAddr) }
 			);
 		}
 
@@ -465,7 +466,7 @@ namespace chdr
 			return false;
 
 		LUID m_LUID;
-		if (!LookupPrivilegeValueW(NULL, L"SeDebugPrivilege", &m_LUID))
+		if (!LookupPrivilegeValue(NULL, L"SeDebugPrivilege", &m_LUID))
 		{
 			CloseHandle(m_hToken);
 			return false;
@@ -514,10 +515,10 @@ namespace chdr
 
 	// ReadProcessMemory implementation.
 	template <class T>
-	T Process_t::Read(LPCVOID m_ReadAddress)
+	T Process_t::Read(std::uintptr_t m_ReadAddress)
 	{
 		T m_pOutputRead;
-		if (!ReadProcessMemory(this->m_hTargetProcessHandle, m_ReadAddress, &m_pOutputRead, sizeof(T), NULL))
+		if (!ReadProcessMemory(this->m_hTargetProcessHandle, (LPCVOID)m_ReadAddress, &m_pOutputRead, sizeof(T), NULL))
 		{
 			CH_LOG("Failed to read memory at addr 0x%X, with error code #%i.", m_ReadAddress, GetLastError());
 		}
@@ -527,10 +528,10 @@ namespace chdr
 
 	// ReadProcessMemory implementation - allows byte arrays.
 	template <typename S>
-	std::size_t Process_t::Read(LPCVOID m_ReadAddress, S m_pBuffer, std::size_t m_nBufferSize)
+	std::size_t Process_t::Read(std::uintptr_t m_ReadAddress, S m_pBuffer, std::size_t m_nBufferSize)
 	{
 		SIZE_T m_nBytesRead = 0;
-		if (!ReadProcessMemory(this->m_hTargetProcessHandle, m_ReadAddress,  m_pBuffer, m_nBufferSize, &m_nBytesRead))
+		if (!ReadProcessMemory(this->m_hTargetProcessHandle, (LPCVOID)m_ReadAddress,  m_pBuffer, m_nBufferSize, &m_nBytesRead))
 		{
 			CH_LOG("Failed to read memory at addr 0x%X, with error code #%d.", m_ReadAddress, GetLastError());
 		}
@@ -646,14 +647,15 @@ namespace chdr
 			const PIMAGE_EXPORT_DIRECTORY m_pExportDirectory = CH_R_CAST<PIMAGE_EXPORT_DIRECTORY>(CH_R_CAST<ULONG_PTR>(m_ImageBuffer) + this->RvaToOffset(m_dSavedExportVirtualAddress));
 			this->m_dExportedFunctionCount = m_pExportDirectory->NumberOfNames;
 
-			WORD* m_pOrdinalAddress = CH_R_CAST<WORD*>(m_pExportDirectory->AddressOfNameOrdinals + CH_R_CAST<uintptr_t>(m_pExportDirectory) - m_dSavedExportVirtualAddress);
-			DWORD* m_pNamesAddress = CH_R_CAST<DWORD*>(m_pExportDirectory->AddressOfNames + CH_R_CAST<uintptr_t>(m_pExportDirectory) - m_dSavedExportVirtualAddress);
-			DWORD* m_pFunctionAddress = CH_R_CAST<DWORD*>(m_pExportDirectory->AddressOfFunctions + CH_R_CAST<uintptr_t>(m_pExportDirectory) - m_dSavedExportVirtualAddress);
+			std::uint16_t* m_pOrdinalAddress = CH_R_CAST<std::uint16_t*>(m_pExportDirectory->AddressOfNameOrdinals + CH_R_CAST<uintptr_t>(m_pExportDirectory) - m_dSavedExportVirtualAddress);
+			std::uint32_t* m_pNamesAddress = CH_R_CAST<std::uint32_t*>(m_pExportDirectory->AddressOfNames + CH_R_CAST<uintptr_t>(m_pExportDirectory) - m_dSavedExportVirtualAddress);
+			std::uint32_t* m_pFunctionAddress = CH_R_CAST<std::uint32_t*>(m_pExportDirectory->AddressOfFunctions + CH_R_CAST<uintptr_t>(m_pExportDirectory) - m_dSavedExportVirtualAddress);
 
 			for (DWORD i = 0; i < this->m_dExportedFunctionCount; ++i)
 			{
-				const WORD m_CurrentOrdinal = m_pOrdinalAddress[i];
-				const DWORD m_CurrentName = m_pNamesAddress[i];
+				const std::uint16_t m_CurrentOrdinal = m_pOrdinalAddress[i];
+				const std::uint32_t m_CurrentName = m_pNamesAddress[i];
+
 				if (m_CurrentOrdinal < 0 || m_CurrentName <= 0 || m_CurrentOrdinal > this->m_dExportedFunctionCount)
 					// Happend a few times, dunno.
 					continue;
@@ -720,16 +722,16 @@ namespace chdr
 		return 0;
 	}
 	// Parsing data out of this image's process.
-	PEHeaderData_t::PEHeaderData_t(Process_t& m_Process, DWORD m_dCustomBaseAddress)
+	PEHeaderData_t::PEHeaderData_t(Process_t& m_Process, std::uintptr_t m_dCustomBaseAddress)
 	{
-		const DWORD m_dProcessBaseAddress = m_dCustomBaseAddress != NULL ? m_dCustomBaseAddress : m_Process.GetBaseAddress();
+		const std::uintptr_t m_dProcessBaseAddress = m_dCustomBaseAddress != NULL ? m_dCustomBaseAddress : m_Process.GetBaseAddress();
 		CH_ASSERT(true, m_dProcessBaseAddress, "Couldn't find base address of target process.");
-
-		IMAGE_DOS_HEADER m_pDOSHeadersTemporary = m_Process.Read<IMAGE_DOS_HEADER>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress));
+	
+		IMAGE_DOS_HEADER m_pDOSHeadersTemporary = m_Process.Read<IMAGE_DOS_HEADER>(m_dProcessBaseAddress);
 		this->m_pDOSHeaders = &m_pDOSHeadersTemporary;
 
-		IMAGE_NT_HEADERS m_NTHeadersTemporary = m_Process.Read<IMAGE_NT_HEADERS>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + this->m_pDOSHeaders->e_lfanew));
-		this->m_pNTHeaders = &m_NTHeadersTemporary;
+		IMAGE_NT_HEADERS m_pNTHeadersTemporary = m_Process.Read<IMAGE_NT_HEADERS>(m_dProcessBaseAddress + this->m_pDOSHeaders->e_lfanew);
+		this->m_pNTHeaders = &m_pNTHeadersTemporary;
 
 		// Ensure image PE headers was valid.
 		CH_ASSERT(true, this->m_pDOSHeaders->e_magic == IMAGE_DOS_SIGNATURE && this->m_pNTHeaders->Signature == IMAGE_NT_SIGNATURE,
@@ -737,7 +739,7 @@ namespace chdr
 
 		for (UINT i = 0; i < m_pNTHeaders->FileHeader.NumberOfSections; ++i)
 		{
-			IMAGE_SECTION_HEADER m_pSectionHeaders = m_Process.Read<IMAGE_SECTION_HEADER>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + this->m_pDOSHeaders->e_lfanew + sizeof(IMAGE_NT_HEADERS) +(i * sizeof(IMAGE_SECTION_HEADER))));
+			IMAGE_SECTION_HEADER m_pSectionHeaders = m_Process.Read<IMAGE_SECTION_HEADER>((m_dProcessBaseAddress + this->m_pDOSHeaders->e_lfanew + sizeof(IMAGE_NT_HEADERS) +(i * sizeof(IMAGE_SECTION_HEADER))));
 
 			this->m_SectionData.push_back(
 				{ CH_R_CAST<char*>(m_pSectionHeaders.Name),
@@ -755,40 +757,48 @@ namespace chdr
 		}
 		else // Export table parsing.
 		{
-			IMAGE_EXPORT_DIRECTORY m_pExportDirectory = m_Process.Read<IMAGE_EXPORT_DIRECTORY>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_dSavedExportVirtualAddress));
-			this->m_dExportedFunctionCount = m_pExportDirectory.NumberOfNames;
 
-			// Read whole RVA block.
-			const auto m_RVABlock = std::make_unique<DWORD[]>(m_pExportDirectory.NumberOfFunctions * sizeof(DWORD));
-			m_Process.Read(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_pExportDirectory.AddressOfFunctions), m_RVABlock.get(), m_pExportDirectory.NumberOfFunctions * sizeof(DWORD));
+			try {
+				IMAGE_EXPORT_DIRECTORY m_pExportDirectory = m_Process.Read<IMAGE_EXPORT_DIRECTORY>((m_dProcessBaseAddress + m_dSavedExportVirtualAddress));
+				this->m_dExportedFunctionCount = m_pExportDirectory.NumberOfNames;
 
-			// Read whole name block.
-			const auto m_NameBlock = std::make_unique<DWORD[]>(this->m_dExportedFunctionCount * sizeof(DWORD));
-			m_Process.Read(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_pExportDirectory.AddressOfNames), m_NameBlock.get(), this->m_dExportedFunctionCount * sizeof(DWORD));
+				// Read whole RVA block.
+				const auto m_RVABlock = std::make_unique<std::uint32_t[]>(m_pExportDirectory.NumberOfFunctions * sizeof(std::uint32_t));
+				m_Process.Read((m_dProcessBaseAddress + m_pExportDirectory.AddressOfFunctions), m_RVABlock.get(), m_pExportDirectory.NumberOfFunctions * sizeof(DWORD));
 
-			// Read whole ordinal block.
-			const auto m_OrdinalBlock = std::make_unique<WORD[]>(this->m_dExportedFunctionCount * sizeof(WORD));
-			m_Process.Read(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_pExportDirectory.AddressOfNameOrdinals), m_OrdinalBlock.get(), this->m_dExportedFunctionCount * sizeof(WORD));
+				// Read whole name block.
+				const auto m_NameBlock = std::make_unique<std::uint32_t[]>(this->m_dExportedFunctionCount * sizeof(std::uint32_t));
+				m_Process.Read((m_dProcessBaseAddress + m_pExportDirectory.AddressOfNames), m_NameBlock.get(), this->m_dExportedFunctionCount * sizeof(DWORD));
 
-			// Ye.
-			PDWORD m_pRVABlock = m_RVABlock.get();
-			PDWORD m_pNameBlock = m_NameBlock.get();
-			PWORD m_pOrdinalBlock = m_OrdinalBlock.get();
+				// Read whole ordinal block.
+				const auto m_OrdinalBlock = std::make_unique<std::uint16_t[]>(this->m_dExportedFunctionCount * sizeof(std::uint16_t));
+				m_Process.Read((m_dProcessBaseAddress + m_pExportDirectory.AddressOfNameOrdinals), m_OrdinalBlock.get(), this->m_dExportedFunctionCount * sizeof(WORD));
 
-			for (int i = 0; i < this->m_dExportedFunctionCount; ++i)
-			{
-				const WORD m_CurrentOrdinal = m_pOrdinalBlock[i];
-				const DWORD m_CurrentName = m_pNameBlock[i];
-				if (m_CurrentOrdinal < 0 || m_CurrentName <= 0 || m_CurrentOrdinal > this->m_dExportedFunctionCount)
-					// Happend a few times, dunno.
-					continue;
+				// Ye.
+				std::uint32_t* m_pRVABlock = m_RVABlock.get();
+				std::uint32_t* m_pNameBlock = m_NameBlock.get();
+				std::uint16_t* m_pOrdinalBlock = m_OrdinalBlock.get();
 
-				char m_szExportName[MAX_PATH];
-				m_Process.Read(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_CurrentName), m_szExportName, sizeof(m_szExportName));
-				m_szExportName[MAX_PATH - 1] = '\0';
+				for (int i = 0; i < this->m_dExportedFunctionCount; ++i)
+				{
+					const std::uint16_t m_CurrentOrdinal = m_pOrdinalBlock[i];
+					const std::uint32_t m_CurrentName = m_pNameBlock[i];
 
-				// Cache desired data.
-				this->m_ExportData.push_back({ m_szExportName, m_pRVABlock[m_CurrentOrdinal], m_CurrentOrdinal });
+					if (m_CurrentOrdinal < 0 || m_CurrentName <= 0 || m_CurrentOrdinal > this->m_dExportedFunctionCount)
+						// Happend a few times, dunno.
+						continue;
+
+					// Read export name.
+					char m_szExportName[MAX_PATH];
+					m_Process.Read((m_dProcessBaseAddress + m_CurrentName), m_szExportName, sizeof(m_szExportName));
+					m_szExportName[MAX_PATH - 1] = '\0';
+
+					// Cache desired data.
+					this->m_ExportData.push_back({ m_szExportName, m_pRVABlock[m_CurrentOrdinal], m_CurrentOrdinal });
+				}
+			}
+			catch (...) {
+
 			}
 		}
 
@@ -802,17 +812,17 @@ namespace chdr
 		else // Import table parsing.
 		{
 			DWORD m_dDescriptorOffset = m_dSavedImportVirtualAddress;
-			IMAGE_IMPORT_DESCRIPTOR m_pImportDescriptor = m_Process.Read<IMAGE_IMPORT_DESCRIPTOR>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_dDescriptorOffset));
+			IMAGE_IMPORT_DESCRIPTOR m_pImportDescriptor = m_Process.Read<IMAGE_IMPORT_DESCRIPTOR>((m_dProcessBaseAddress + m_dDescriptorOffset));
 
 			while (m_pImportDescriptor.Name)
 			{
 				// Read module name.
 				char m_szModuleName[MAX_PATH];
-				m_Process.Read(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_pImportDescriptor.Name), m_szModuleName, sizeof(m_szModuleName));
+				m_Process.Read((m_dProcessBaseAddress + m_pImportDescriptor.Name), m_szModuleName, sizeof(m_szModuleName));
 				m_szModuleName[MAX_PATH - 1] = '\0';
 
 				std::size_t m_nThunkOffset = m_pImportDescriptor.OriginalFirstThunk ? m_pImportDescriptor.OriginalFirstThunk : m_pImportDescriptor.FirstThunk;
-				IMAGE_THUNK_DATA m_pThunkData = m_Process.Read<IMAGE_THUNK_DATA>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_nThunkOffset));
+				IMAGE_THUNK_DATA m_pThunkData = m_Process.Read<IMAGE_THUNK_DATA>((m_dProcessBaseAddress + m_nThunkOffset));
 
 				while (m_pThunkData.u1.AddressOfData)
 				{
@@ -820,7 +830,7 @@ namespace chdr
 					{
 						// Read function name.
 						char m_szFunctionName[MAX_PATH];
-						m_Process.Read(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + (m_pThunkData.u1.AddressOfData + 2)), m_szFunctionName, sizeof(m_szFunctionName));
+						m_Process.Read((m_dProcessBaseAddress + (m_pThunkData.u1.AddressOfData + 2)), m_szFunctionName, sizeof(m_szFunctionName));
 						m_szFunctionName[MAX_PATH - 1] = '\0';
 
 						// Cache desired data.
@@ -833,12 +843,12 @@ namespace chdr
 
 					// Move onto next thunk.
 					m_nThunkOffset += sizeof(IMAGE_THUNK_DATA32);
-					m_pThunkData = m_Process.Read<IMAGE_THUNK_DATA>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_nThunkOffset));
+					m_pThunkData = m_Process.Read<IMAGE_THUNK_DATA>((m_dProcessBaseAddress + m_nThunkOffset));
 				}
 
 				// Move onto next descriptor.
 				m_dDescriptorOffset += sizeof(IMAGE_IMPORT_DESCRIPTOR);
-				m_pImportDescriptor = m_Process.Read<IMAGE_IMPORT_DESCRIPTOR>(CH_R_CAST<LPCVOID>(m_dProcessBaseAddress + m_dDescriptorOffset));
+				m_pImportDescriptor = m_Process.Read<IMAGE_IMPORT_DESCRIPTOR>((m_dProcessBaseAddress + m_dDescriptorOffset));
 			}
 		}
 
@@ -932,7 +942,7 @@ namespace chdr
 		std::memcpy(&this->m_ImageBuffer[0], m_ImageBuffer, m_nImageSize);
 
 		// Parse PE header information.
-		m_PEHeaderData = PEHeaderData_t(m_ImageBuffer, m_nImageSize);
+		m_PEHeaderData = PEHeaderData_t(this->m_ImageBuffer.data(), m_nImageSize);
 	}
 
 	// Ensure we found the target PE image.
@@ -1141,7 +1151,7 @@ namespace chdr
 	}
 
 	// Check which module this thread is associated with.
-	std::string Thread_t::GetOwningModule(chdr::Process_t& m_Process, DWORD m_dStartAddress)
+	std::string Thread_t::GetOwningModule(chdr::Process_t& m_Process, std::uintptr_t m_dStartAddress)
 	{
 		// Using cached data here, maybe this can be bad if all of a sudden a new module is loaded.
 		// But honestly, idc because it's so much faster than enumerating modules again..
@@ -1222,7 +1232,7 @@ namespace chdr
 	}
 
 	// Setup module in process by address in processes' memory space.
-	Module_t::Module_t(chdr::Process_t& m_Process, DWORD m_dModuleBaseAddress, DWORD m_dModuleSize)
+	Module_t::Module_t(chdr::Process_t& m_Process, std::uintptr_t m_dModuleBaseAddress, DWORD m_dModuleSize)
 	{
 		this->m_dModuleBaseAddress = m_dModuleBaseAddress;
 		this->m_dModuleSize = m_dModuleSize;
@@ -1236,7 +1246,7 @@ namespace chdr
 		this->m_ModuleData.resize(this->m_dModuleSize);
 
 		const auto m_ModuleDataTemp = std::make_unique<std::uint8_t[]>(this->m_dModuleSize);
-		m_Process.Read(CH_R_CAST<LPCVOID>(this->m_dModuleBaseAddress), m_ModuleDataTemp.get(), this->m_dModuleSize);
+		m_Process.Read((this->m_dModuleBaseAddress), m_ModuleDataTemp.get(), this->m_dModuleSize);
 		std::memcpy(&this->m_ModuleData[0], m_ModuleDataTemp.get(), this->m_dModuleSize);
 
 		this->m_PEHeaderData = PEHeaderData_t(m_Process, this->m_dModuleBaseAddress);

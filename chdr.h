@@ -86,7 +86,7 @@ namespace chdr
 		PEHeaderData_t(std::uint8_t* m_ImageBuffer, std::size_t m_ImageSize);
 
 		// Parsing data out of this image's process.
-		PEHeaderData_t(Process_t& m_Process, DWORD m_dCustomBaseAddress = NULL);
+		PEHeaderData_t(Process_t& m_Process, std::uintptr_t m_dCustomBaseAddress = NULL);
 
 	public:
 
@@ -178,7 +178,7 @@ namespace chdr
 
 	class Module_t
 	{
-		DWORD m_dModuleBaseAddress = NULL;
+		std::uintptr_t m_dModuleBaseAddress = NULL;
 		DWORD m_dModuleSize = NULL;
 
 		PEHeaderData_t m_PEHeaderData = { };
@@ -193,7 +193,7 @@ namespace chdr
 		Module_t(chdr::Process_t& m_Process, const char* m_szModuleName);
 
 		// Setup module in process by address in process. (plz pass correct data here :D)
-		Module_t(chdr::Process_t& m_Process, DWORD m_dModuleBaseAddress, DWORD m_dModuleSize);
+		Module_t(chdr::Process_t& m_Process, std::uintptr_t m_dModuleBaseAddress, DWORD m_dModuleSize);
 
 		// Ease of use for building constructors.
 		void SetupModule_Internal(chdr::Process_t& m_Process);
@@ -267,7 +267,7 @@ namespace chdr
 		void Resume();
 
 		// Check which module this thread is associated with.
-		std::string GetOwningModule(chdr::Process_t& m_Process, DWORD m_dStartAddress);
+		std::string GetOwningModule(chdr::Process_t& m_Process, std::uintptr_t m_dStartAddress);
 
 		// Ensure we found a HANDLE to the target thread.
 		bool IsValid();
@@ -469,7 +469,7 @@ namespace chdr
 			std::string m_szModuleName = "";
 			std::string m_szModulePath = "";
 			DWORD		m_dModuleSize = 0;
-			DWORD		m_dModuleBaseAddress = 0;
+			std::uintptr_t		m_dModuleBaseAddress = 0;
 			//	Module_t    m_Module = { };		// For manipulating this module.
 		};
 
@@ -504,7 +504,7 @@ namespace chdr
 		std::string GetName();
 
 		// The base address of the target process.
-		DWORD GetBaseAddress();
+		std::uintptr_t GetBaseAddress();
 
 		// The process ID of the target process. (lol)
 		DWORD GetProcessID();
@@ -556,12 +556,12 @@ namespace chdr
 
 		// ReadProcessMemory implementation.
 		template <class T>
-		T Read(LPCVOID m_ReadAddress);
+		T Read(std::uintptr_t m_ReadAddress);
 
 		// ReadProcessMemory implementation - allows byte arrays.
 
 		template <typename S>
-		std::size_t Read(LPCVOID m_ReadAddress, S m_pBuffer, std::size_t m_nBufferSize);
+		std::size_t Read(std::uintptr_t m_ReadAddress, S m_pBuffer, std::size_t m_nBufferSize);
 
 		// WriteProcessMemory implementation.
 		template<typename S>
