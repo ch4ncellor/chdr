@@ -734,8 +734,8 @@ namespace chdr
 		this->m_pNTHeaders = &m_pNTHeadersTemporary;
 
 		// Ensure image PE headers was valid.
-		CH_ASSERT(true, this->m_pDOSHeaders->e_magic == IMAGE_DOS_SIGNATURE && this->m_pNTHeaders->Signature == IMAGE_NT_SIGNATURE,
-			"Couldn't find MZ&NT header. 0x%X | 0x%X", this->m_pNTHeaders->Signature, this->m_pDOSHeaders->e_magic);
+		CH_ASSERT(true, this->IsValid(), "Couldn't find MZ&NT header. 0x%X | 0x%X",
+			this->m_pNTHeaders->Signature, this->m_pDOSHeaders->e_magic);
 
 		for (UINT i = 0; i < m_pNTHeaders->FileHeader.NumberOfSections; ++i)
 		{
@@ -757,48 +757,42 @@ namespace chdr
 		}
 		else // Export table parsing.
 		{
+			IMAGE_EXPORT_DIRECTORY m_pExportDirectory = m_Process.Read<IMAGE_EXPORT_DIRECTORY>((m_dProcessBaseAddress + m_dSavedExportVirtualAddress));
+			this->m_dExportedFunctionCount = m_pExportDirectory.NumberOfNames;
 
-			try {
-				IMAGE_EXPORT_DIRECTORY m_pExportDirectory = m_Process.Read<IMAGE_EXPORT_DIRECTORY>((m_dProcessBaseAddress + m_dSavedExportVirtualAddress));
-				this->m_dExportedFunctionCount = m_pExportDirectory.NumberOfNames;
+			// Read whole RVA block.
+			const auto m_RVABlock = std::make_unique<std::uint32_t[]>(m_pExportDirectory.NumberOfFunctions * sizeof(std::uint32_t));
+			m_Process.Read((m_dProcessBaseAddress + m_pExportDirectory.AddressOfFunctions), m_RVABlock.get(), m_pExportDirectory.NumberOfFunctions * sizeof(DWORD));
 
-				// Read whole RVA block.
-				const auto m_RVABlock = std::make_unique<std::uint32_t[]>(m_pExportDirectory.NumberOfFunctions * sizeof(std::uint32_t));
-				m_Process.Read((m_dProcessBaseAddress + m_pExportDirectory.AddressOfFunctions), m_RVABlock.get(), m_pExportDirectory.NumberOfFunctions * sizeof(DWORD));
+			// Read whole name block.
+			const auto m_NameBlock = std::make_unique<std::uint32_t[]>(this->m_dExportedFunctionCount * sizeof(std::uint32_t));
+			m_Process.Read((m_dProcessBaseAddress + m_pExportDirectory.AddressOfNames), m_NameBlock.get(), this->m_dExportedFunctionCount * sizeof(DWORD));
 
-				// Read whole name block.
-				const auto m_NameBlock = std::make_unique<std::uint32_t[]>(this->m_dExportedFunctionCount * sizeof(std::uint32_t));
-				m_Process.Read((m_dProcessBaseAddress + m_pExportDirectory.AddressOfNames), m_NameBlock.get(), this->m_dExportedFunctionCount * sizeof(DWORD));
+			// Read whole ordinal block.
+			const auto m_OrdinalBlock = std::make_unique<std::uint16_t[]>(this->m_dExportedFunctionCount * sizeof(std::uint16_t));
+			m_Process.Read((m_dProcessBaseAddress + m_pExportDirectory.AddressOfNameOrdinals), m_OrdinalBlock.get(), this->m_dExportedFunctionCount * sizeof(WORD));
 
-				// Read whole ordinal block.
-				const auto m_OrdinalBlock = std::make_unique<std::uint16_t[]>(this->m_dExportedFunctionCount * sizeof(std::uint16_t));
-				m_Process.Read((m_dProcessBaseAddress + m_pExportDirectory.AddressOfNameOrdinals), m_OrdinalBlock.get(), this->m_dExportedFunctionCount * sizeof(WORD));
+			// Ye.
+			std::uint32_t* m_pRVABlock = m_RVABlock.get();
+			std::uint32_t* m_pNameBlock = m_NameBlock.get();
+			std::uint16_t* m_pOrdinalBlock = m_OrdinalBlock.get();
 
-				// Ye.
-				std::uint32_t* m_pRVABlock = m_RVABlock.get();
-				std::uint32_t* m_pNameBlock = m_NameBlock.get();
-				std::uint16_t* m_pOrdinalBlock = m_OrdinalBlock.get();
+			for (std::size_t i = 0; i < this->m_dExportedFunctionCount; ++i)
+			{
+				const std::uint16_t m_CurrentOrdinal = m_pOrdinalBlock[i];
+				const std::uint32_t m_CurrentName = m_pNameBlock[i];
 
-				for (int i = 0; i < this->m_dExportedFunctionCount; ++i)
-				{
-					const std::uint16_t m_CurrentOrdinal = m_pOrdinalBlock[i];
-					const std::uint32_t m_CurrentName = m_pNameBlock[i];
+				if (m_CurrentOrdinal < 0 || m_CurrentName <= 0 || m_CurrentOrdinal > this->m_dExportedFunctionCount)
+					// Happend a few times, dunno.
+					continue;
 
-					if (m_CurrentOrdinal < 0 || m_CurrentName <= 0 || m_CurrentOrdinal > this->m_dExportedFunctionCount)
-						// Happend a few times, dunno.
-						continue;
+				// Read export name.
+				char m_szExportName[MAX_PATH];
+				m_Process.Read((m_dProcessBaseAddress + m_CurrentName), m_szExportName, sizeof(m_szExportName));
+				m_szExportName[MAX_PATH - 1] = '\0';
 
-					// Read export name.
-					char m_szExportName[MAX_PATH];
-					m_Process.Read((m_dProcessBaseAddress + m_CurrentName), m_szExportName, sizeof(m_szExportName));
-					m_szExportName[MAX_PATH - 1] = '\0';
-
-					// Cache desired data.
-					this->m_ExportData.push_back({ m_szExportName, m_pRVABlock[m_CurrentOrdinal], m_CurrentOrdinal });
-				}
-			}
-			catch (...) {
-
+				// Cache desired data.
+				this->m_ExportData.push_back({ m_szExportName, m_pRVABlock[m_CurrentOrdinal], m_CurrentOrdinal });
 			}
 		}
 
