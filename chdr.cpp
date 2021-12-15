@@ -531,7 +531,7 @@ namespace chdr
 	std::size_t Process_t::Read(std::uintptr_t m_ReadAddress, S m_pBuffer, std::size_t m_nBufferSize)
 	{
 		SIZE_T m_nBytesRead = 0;
-		if (!ReadProcessMemory(this->m_hTargetProcessHandle, (LPCVOID)m_ReadAddress,  m_pBuffer, m_nBufferSize, &m_nBytesRead))
+		if (!ReadProcessMemory(this->m_hTargetProcessHandle, (LPCVOID)m_ReadAddress, m_pBuffer, m_nBufferSize, &m_nBytesRead))
 		{
 			CH_LOG("Failed to read memory at addr 0x%X, with error code #%d.", m_ReadAddress, GetLastError());
 		}
@@ -628,7 +628,8 @@ namespace chdr
 			this->m_SectionData.push_back(
 				{ CH_R_CAST<char*>(m_pSectionHeaders->Name),
 				m_pSectionHeaders->VirtualAddress,
-				m_pSectionHeaders->Misc.VirtualSize }
+				m_pSectionHeaders->Misc.VirtualSize,
+				m_pSectionHeaders->Characteristics }
 			);
 
 			// Move onto next section.
@@ -651,7 +652,7 @@ namespace chdr
 			std::uint32_t* m_pNamesAddress = CH_R_CAST<std::uint32_t*>(m_pExportDirectory->AddressOfNames + CH_R_CAST<uintptr_t>(m_pExportDirectory) - m_dSavedExportVirtualAddress);
 			std::uint32_t* m_pFunctionAddress = CH_R_CAST<std::uint32_t*>(m_pExportDirectory->AddressOfFunctions + CH_R_CAST<uintptr_t>(m_pExportDirectory) - m_dSavedExportVirtualAddress);
 
-			for (DWORD i = 0; i < this->m_dExportedFunctionCount; ++i)
+			for (std::size_t i = 0; i < this->m_dExportedFunctionCount; ++i)
 			{
 				const std::uint16_t m_CurrentOrdinal = m_pOrdinalAddress[i];
 				const std::uint32_t m_CurrentName = m_pNamesAddress[i];
@@ -724,32 +725,32 @@ namespace chdr
 	// Parsing data out of this image's process.
 	PEHeaderData_t::PEHeaderData_t(Process_t& m_Process, std::uintptr_t m_dCustomBaseAddress)
 	{
-		const std::uintptr_t m_dProcessBaseAddress = m_dCustomBaseAddress != NULL ? m_dCustomBaseAddress : m_Process.GetBaseAddress();
-		CH_ASSERT(true, m_dProcessBaseAddress, "Couldn't find base address of target process.");
+		const std::uintptr_t m_BaseAddress = m_dCustomBaseAddress != NULL ? m_dCustomBaseAddress : m_Process.GetBaseAddress();
+		CH_ASSERT(true, m_BaseAddress, "Couldn't find base address of target process.");
 	
-		IMAGE_DOS_HEADER m_pDOSHeadersTemporary = m_Process.Read<IMAGE_DOS_HEADER>(m_dProcessBaseAddress);
+		IMAGE_DOS_HEADER m_pDOSHeadersTemporary = m_Process.Read<IMAGE_DOS_HEADER>(m_BaseAddress);
 		this->m_pDOSHeaders = &m_pDOSHeadersTemporary;
 
-		IMAGE_NT_HEADERS m_pNTHeadersTemporary = m_Process.Read<IMAGE_NT_HEADERS>(m_dProcessBaseAddress + this->m_pDOSHeaders->e_lfanew);
+		IMAGE_NT_HEADERS m_pNTHeadersTemporary = m_Process.Read<IMAGE_NT_HEADERS>(m_BaseAddress + this->m_pDOSHeaders->e_lfanew);
 		this->m_pNTHeaders = &m_pNTHeadersTemporary;
 
 		// Ensure image PE headers was valid.
-		CH_ASSERT(true, this->IsValid(), "Couldn't find MZ&NT header. 0x%X | 0x%X",
-			this->m_pNTHeaders->Signature, this->m_pDOSHeaders->e_magic);
+		CH_ASSERT(true, this->IsValid(), "Couldn't find MZ&NT header.");
 
 		for (UINT i = 0; i < m_pNTHeaders->FileHeader.NumberOfSections; ++i)
 		{
-			IMAGE_SECTION_HEADER m_pSectionHeaders = m_Process.Read<IMAGE_SECTION_HEADER>((m_dProcessBaseAddress + this->m_pDOSHeaders->e_lfanew + sizeof(IMAGE_NT_HEADERS) +(i * sizeof(IMAGE_SECTION_HEADER))));
+			IMAGE_SECTION_HEADER m_pSectionHeaders = m_Process.Read<IMAGE_SECTION_HEADER>((m_BaseAddress + this->m_pDOSHeaders->e_lfanew + sizeof(IMAGE_NT_HEADERS) +(i * sizeof(IMAGE_SECTION_HEADER))));
 
 			this->m_SectionData.push_back(
 				{ CH_R_CAST<char*>(m_pSectionHeaders.Name),
 				m_pSectionHeaders.VirtualAddress,
-				m_pSectionHeaders.Misc.VirtualSize }
+				m_pSectionHeaders.Misc.VirtualSize,
+				m_pSectionHeaders.Characteristics}
 			);
 		}
 
-		const DWORD m_dSavedExportVirtualAddress = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
-		const DWORD m_dSavedExportSize = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
+		 DWORD m_dSavedExportVirtualAddress = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
+		 DWORD m_dSavedExportSize = this->m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
 
 		if (!m_dSavedExportVirtualAddress || !m_dSavedExportSize)
 		{
@@ -757,20 +758,20 @@ namespace chdr
 		}
 		else // Export table parsing.
 		{
-			IMAGE_EXPORT_DIRECTORY m_pExportDirectory = m_Process.Read<IMAGE_EXPORT_DIRECTORY>((m_dProcessBaseAddress + m_dSavedExportVirtualAddress));
+			IMAGE_EXPORT_DIRECTORY m_pExportDirectory = m_Process.Read<IMAGE_EXPORT_DIRECTORY>((m_BaseAddress + m_dSavedExportVirtualAddress));
 			this->m_dExportedFunctionCount = m_pExportDirectory.NumberOfNames;
 
 			// Read whole RVA block.
 			const auto m_RVABlock = std::make_unique<std::uint32_t[]>(m_pExportDirectory.NumberOfFunctions * sizeof(std::uint32_t));
-			m_Process.Read((m_dProcessBaseAddress + m_pExportDirectory.AddressOfFunctions), m_RVABlock.get(), m_pExportDirectory.NumberOfFunctions * sizeof(DWORD));
+			m_Process.Read((m_BaseAddress + m_pExportDirectory.AddressOfFunctions), m_RVABlock.get(), m_pExportDirectory.NumberOfFunctions * sizeof(std::uint32_t));
 
 			// Read whole name block.
 			const auto m_NameBlock = std::make_unique<std::uint32_t[]>(this->m_dExportedFunctionCount * sizeof(std::uint32_t));
-			m_Process.Read((m_dProcessBaseAddress + m_pExportDirectory.AddressOfNames), m_NameBlock.get(), this->m_dExportedFunctionCount * sizeof(DWORD));
+			m_Process.Read((m_BaseAddress + m_pExportDirectory.AddressOfNames), m_NameBlock.get(), this->m_dExportedFunctionCount * sizeof(std::uint32_t));
 
 			// Read whole ordinal block.
 			const auto m_OrdinalBlock = std::make_unique<std::uint16_t[]>(this->m_dExportedFunctionCount * sizeof(std::uint16_t));
-			m_Process.Read((m_dProcessBaseAddress + m_pExportDirectory.AddressOfNameOrdinals), m_OrdinalBlock.get(), this->m_dExportedFunctionCount * sizeof(WORD));
+			m_Process.Read((m_BaseAddress + m_pExportDirectory.AddressOfNameOrdinals), m_OrdinalBlock.get(), this->m_dExportedFunctionCount * sizeof(std::uint16_t));
 
 			// Ye.
 			std::uint32_t* m_pRVABlock = m_RVABlock.get();
@@ -788,7 +789,7 @@ namespace chdr
 
 				// Read export name.
 				char m_szExportName[MAX_PATH];
-				m_Process.Read((m_dProcessBaseAddress + m_CurrentName), m_szExportName, sizeof(m_szExportName));
+				m_Process.Read((m_BaseAddress + m_CurrentName), m_szExportName, sizeof(m_szExportName));
 				m_szExportName[MAX_PATH - 1] = '\0';
 
 				// Cache desired data.
@@ -806,17 +807,17 @@ namespace chdr
 		else // Import table parsing.
 		{
 			DWORD m_dDescriptorOffset = m_dSavedImportVirtualAddress;
-			IMAGE_IMPORT_DESCRIPTOR m_pImportDescriptor = m_Process.Read<IMAGE_IMPORT_DESCRIPTOR>((m_dProcessBaseAddress + m_dDescriptorOffset));
+			IMAGE_IMPORT_DESCRIPTOR m_pImportDescriptor = m_Process.Read<IMAGE_IMPORT_DESCRIPTOR>((m_BaseAddress + m_dDescriptorOffset));
 
 			while (m_pImportDescriptor.Name)
 			{
 				// Read module name.
 				char m_szModuleName[MAX_PATH];
-				m_Process.Read((m_dProcessBaseAddress + m_pImportDescriptor.Name), m_szModuleName, sizeof(m_szModuleName));
+				m_Process.Read((m_BaseAddress + m_pImportDescriptor.Name), m_szModuleName, sizeof(m_szModuleName));
 				m_szModuleName[MAX_PATH - 1] = '\0';
 
 				std::size_t m_nThunkOffset = m_pImportDescriptor.OriginalFirstThunk ? m_pImportDescriptor.OriginalFirstThunk : m_pImportDescriptor.FirstThunk;
-				IMAGE_THUNK_DATA m_pThunkData = m_Process.Read<IMAGE_THUNK_DATA>((m_dProcessBaseAddress + m_nThunkOffset));
+				IMAGE_THUNK_DATA m_pThunkData = m_Process.Read<IMAGE_THUNK_DATA>((m_BaseAddress + m_nThunkOffset));
 
 				while (m_pThunkData.u1.AddressOfData)
 				{
@@ -824,7 +825,7 @@ namespace chdr
 					{
 						// Read function name.
 						char m_szFunctionName[MAX_PATH];
-						m_Process.Read((m_dProcessBaseAddress + (m_pThunkData.u1.AddressOfData + 2)), m_szFunctionName, sizeof(m_szFunctionName));
+						m_Process.Read((m_BaseAddress + (m_pThunkData.u1.AddressOfData + 2)), m_szFunctionName, sizeof(m_szFunctionName));
 						m_szFunctionName[MAX_PATH - 1] = '\0';
 
 						// Cache desired data.
@@ -837,12 +838,12 @@ namespace chdr
 
 					// Move onto next thunk.
 					m_nThunkOffset += sizeof(IMAGE_THUNK_DATA32);
-					m_pThunkData = m_Process.Read<IMAGE_THUNK_DATA>((m_dProcessBaseAddress + m_nThunkOffset));
+					m_pThunkData = m_Process.Read<IMAGE_THUNK_DATA>((m_BaseAddress + m_nThunkOffset));
 				}
 
 				// Move onto next descriptor.
 				m_dDescriptorOffset += sizeof(IMAGE_IMPORT_DESCRIPTOR);
-				m_pImportDescriptor = m_Process.Read<IMAGE_IMPORT_DESCRIPTOR>((m_dProcessBaseAddress + m_dDescriptorOffset));
+				m_pImportDescriptor = m_Process.Read<IMAGE_IMPORT_DESCRIPTOR>((m_BaseAddress + m_dDescriptorOffset));
 			}
 		}
 

@@ -19,12 +19,12 @@ namespace chdr
 
 #ifdef SHOULD_PRINT_DEBUG_LOGS
 	// Custom debug assert/log.
-#define CH_ASSERT(x, b, s, ...) if (!(b)) {  if (s) { std::printf("[!] "); printf_s(s, __VA_ARGS__); std::printf("\n"); } if constexpr (x) return;  }
-#define CH_LOG(s, ...) std::printf("[!] "); std::printf(s, __VA_ARGS__); std::printf("\n");
+#define CH_LOG(s, ...) { std::printf("[!] "); std::printf(s, __VA_ARGS__); std::printf("\n"); }
+#define CH_ASSERT(x, b, s, ...) if (!(b)) {  if (s) CH_LOG(s, __VA_ARGS__) if constexpr (x) return;  }
 #else
 	// Custom debug assert/log.
-#define CH_ASSERT(x, b, s, ...) if (!(b)) { if (x) return;  }
 #define CH_LOG(s, ...) (void)0
+#define CH_ASSERT(x, b, s, ...) if (!(b)) { if (x) return;  }
 #endif
 
 	// Custom casting macros, because fucking C++ style casts are just TOO long.
@@ -51,12 +51,13 @@ namespace chdr
 			std::string m_szSectionName = "";
 			DWORD		m_dSectionAddress = 0;
 			DWORD		m_dSectionSize = 0;
+			DWORD		m_dSectionCharacteristics = 0;
 		};
 
 		struct ExportData_t
 		{
 			std::string m_szExportName = "";
-			uint32_t		m_dExportAddress = 0;
+			uint32_t    m_dExportAddress = 0;
 			DWORD		m_dOrdinalNumber = 0;
 		};
 
