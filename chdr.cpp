@@ -665,9 +665,11 @@ namespace chdr
 		else // Debug table parsing.
 		{
 			const PIMAGE_DEBUG_DIRECTORY m_DebugData = CH_R_CAST<PIMAGE_DEBUG_DIRECTORY>(m_ImageBuffer + this->RvaToOffset(m_DebugDataDirectory.VirtualAddress));
-			const CV_INFO_PDB70 *m_DebugPDBInfo = CH_R_CAST<CV_INFO_PDB70*>(m_ImageBuffer + this->RvaToOffset(m_DebugData->AddressOfRawData));
-	
-			this->m_DebugData = { (char*)m_DebugPDBInfo->PdbFileName, m_DebugPDBInfo->Signature, m_DebugPDBInfo->Age };
+			if (m_DebugData->Type == IMAGE_DEBUG_TYPE_CODEVIEW)
+			{
+				const CV_INFO_PDB70* m_DebugPDBInfo = CH_R_CAST<CV_INFO_PDB70*>(m_ImageBuffer + this->RvaToOffset(m_DebugData->AddressOfRawData));
+				this->m_DebugData = { (char*)m_DebugPDBInfo->PdbFileName, m_DebugPDBInfo->Signature, m_DebugPDBInfo->Age };
+			}
 		}
 
 		if (!m_ExportDataDirectory.VirtualAddress || !m_ExportDataDirectory.Size)
@@ -693,7 +695,7 @@ namespace chdr
 					continue;
 
 				char* m_szExportName = CH_R_CAST<char*>(m_CurrentName + CH_R_CAST<uintptr_t>(m_pExportDirectory) - m_ExportDataDirectory.VirtualAddress);
-				this->m_ExportData.push_back({m_szExportName, m_pFunctionAddress[m_CurrentOrdinal], m_CurrentOrdinal});
+				this->m_ExportData.push_back({ m_szExportName, m_pFunctionAddress[m_CurrentOrdinal], m_CurrentOrdinal });
 			}
 		}
 
@@ -769,7 +771,7 @@ namespace chdr
 				m_pSectionHeaders.Misc.VirtualSize,
 				m_pSectionHeaders.Characteristics }
 			);
-		}	
+		}
 
 		IMAGE_DATA_DIRECTORY m_ExportDataDirectory = this->GetDataDirectory(IMAGE_DIRECTORY_ENTRY_EXPORT);
 		IMAGE_DATA_DIRECTORY m_ImportDataDirectory = this->GetDataDirectory(IMAGE_DIRECTORY_ENTRY_IMPORT);
@@ -792,7 +794,7 @@ namespace chdr
 			m_ImportDataDirectory = m_NT64Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
 			m_DebugDataDirectory = m_NT64Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG];
 #endif
-	}
+		}
 
 		if (!m_DebugDataDirectory.VirtualAddress || !m_DebugDataDirectory.Size)
 		{
@@ -801,9 +803,11 @@ namespace chdr
 		else // Debug table parsing.
 		{
 			const IMAGE_DEBUG_DIRECTORY m_DebugData = m_Process.Read<IMAGE_DEBUG_DIRECTORY>(m_BaseAddress + m_DebugDataDirectory.VirtualAddress);
-			const CV_INFO_PDB70 m_DebugPDBInfo = m_Process.Read<CV_INFO_PDB70>(m_BaseAddress + m_DebugData.AddressOfRawData);
-
-			this->m_DebugData = { (char*)m_DebugPDBInfo.PdbFileName, m_DebugPDBInfo.Signature, m_DebugPDBInfo.Age };
+			if (m_DebugData.Type == IMAGE_DEBUG_TYPE_CODEVIEW)
+			{
+				const CV_INFO_PDB70 m_DebugPDBInfo = m_Process.Read<CV_INFO_PDB70>(m_BaseAddress + m_DebugData.AddressOfRawData);
+				this->m_DebugData = { (char*)m_DebugPDBInfo.PdbFileName, m_DebugPDBInfo.Signature, m_DebugPDBInfo.Age };
+			}
 		}
 
 		if (!m_ExportDataDirectory.VirtualAddress || !m_ExportDataDirectory.Size)
@@ -947,6 +951,11 @@ namespace chdr
 		return this->m_ImportData;
 	}
 
+	// Helper function to get debug directories data of PE image.
+	PEHeaderData_t::DebugData_t PEHeaderData_t::GetDebugData()
+	{
+		return this->m_DebugData;
+	}
 	// Convert relative virtual address to file offset.
 	std::uint32_t PEHeaderData_t::RvaToOffset(std::uint32_t m_dRva)
 	{

@@ -126,6 +126,10 @@ namespace chdr
 		// Helper function to get imported functions' data of PE image.
 		std::vector<ImportData_t> GetImportData();
 
+		// Helper function to get debug directories data of PE image.
+		DebugData_t GetDebugData();
+		
+
 		// Convert relative virtual address to file offset.
 		std::uint32_t RvaToOffset(std::uint32_t m_dRva);
 
