@@ -67,10 +67,26 @@ namespace chdr
 			std::string m_szImportName = "";
 		};
 
+		struct DebugData_t
+		{
+			std::string m_szPDBPath = "";
+			GUID		m_GUIDSignature;
+			DWORD		m_Age = NULL;
+		};
+
+		// Only for PDB7.0 format!
+		struct CV_INFO_PDB70 {
+			DWORD	CvSignature;
+			GUID	Signature;
+			DWORD	Age;
+			BYTE	PdbFileName[MAX_PATH];
+		};
+
 		// For caching desired data.
 		std::vector<SectionData_t> m_SectionData = { };
 		std::vector<ExportData_t> m_ExportData = { };
 		std::vector<ImportData_t> m_ImportData = { };
+		DebugData_t				  m_DebugData  = { };
 
 		PIMAGE_DOS_HEADER        m_pDOSHeaders = { 0 };
 		PIMAGE_NT_HEADERS        m_pNTHeaders = { 0 };
@@ -324,16 +340,12 @@ namespace chdr
 			ARCHITECTURE_MAXIMUM = ARCHITECTURE_x86 + 1
 		};
 
-		// Basic process information.
-		HANDLE m_hTargetProcessHandle = { 0 };
-		DWORD  m_nTargetProcessID = 0;
-
 	private:
 		PEHeaderData_t m_PEHeaderData = { };
 
 		// Basic process information.
-	/*	HANDLE m_hTargetProcessHandle = { 0 };
-		DWORD  m_nTargetProcessID = 0;*/
+		HANDLE m_hTargetProcessHandle = { 0 };
+		DWORD  m_nTargetProcessID = 0;
 
 		// For saving off this processes' architecture type.
 		eProcessArchitecture m_eProcessArchitecture = eProcessArchitecture::ARCHITECTURE_UNKNOWN;
@@ -465,7 +477,6 @@ namespace chdr
 			DWORD		m_dThreadID = 0;
 			DWORD		m_dThreadStartAddress = 0;
 			bool		m_bIsThreadSuspended = false;
-			//	Thread_t    m_Thread = { };		// For manipulating this thread.
 		};
 
 		// Relevant information pertaining a target module.
@@ -474,8 +485,7 @@ namespace chdr
 			std::string m_szModuleName = "";
 			std::string m_szModulePath = "";
 			DWORD		m_dModuleSize = 0;
-			std::uintptr_t		m_dModuleBaseAddress = 0;
-			//	Module_t    m_Module = { };		// For manipulating this module.
+			std::uintptr_t m_dModuleBaseAddress = 0;
 		};
 
 		// Caching all loaded modules in target process.
@@ -564,7 +574,6 @@ namespace chdr
 		T Read(std::uintptr_t m_ReadAddress);
 
 		// ReadProcessMemory implementation - allows byte arrays.
-
 		template <typename S>
 		std::size_t Read(std::uintptr_t m_ReadAddress, S m_pBuffer, std::size_t m_nBufferSize);
 

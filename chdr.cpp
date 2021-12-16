@@ -637,6 +637,7 @@ namespace chdr
 
 		IMAGE_DATA_DIRECTORY m_ExportDataDirectory = this->GetDataDirectory(IMAGE_DIRECTORY_ENTRY_EXPORT);
 		IMAGE_DATA_DIRECTORY m_ImportDataDirectory = this->GetDataDirectory(IMAGE_DIRECTORY_ENTRY_IMPORT);
+		IMAGE_DATA_DIRECTORY m_DebugDataDirectory = this->GetDataDirectory(IMAGE_DIRECTORY_ENTRY_DEBUG);
 
 		if (this->m_pNTHeaders->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC)
 		{
@@ -644,6 +645,7 @@ namespace chdr
 			const PIMAGE_NT_HEADERS32 m_NT32Temporary = CH_R_CAST<PIMAGE_NT_HEADERS32>(this->m_pNTHeaders);
 			m_ExportDataDirectory = m_NT32Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
 			m_ImportDataDirectory = m_NT32Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+			m_DebugDirectory = m_NT32Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG];
 #endif
 		}
 		else if (this->m_pNTHeaders->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
@@ -652,7 +654,20 @@ namespace chdr
 			const PIMAGE_NT_HEADERS64 m_NT64Temporary = CH_R_CAST<PIMAGE_NT_HEADERS64>(this->m_pNTHeaders);
 			m_ExportDataDirectory = m_NT64Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
 			m_ImportDataDirectory = m_NT64Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+			m_DebugDataDirectory = m_NT64Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG];
 #endif
+		}
+
+		if (!m_DebugDataDirectory.VirtualAddress || !m_DebugDataDirectory.Size)
+		{
+			CH_LOG("Debug table didn't exist for current region. 0x%x | 0X%x", m_DebugDataDirectory.VirtualAddress, m_DebugDataDirectory.Size);
+		}
+		else // Debug table parsing.
+		{
+			const PIMAGE_DEBUG_DIRECTORY m_DebugData = CH_R_CAST<PIMAGE_DEBUG_DIRECTORY>(m_ImageBuffer + this->RvaToOffset(m_DebugDataDirectory.VirtualAddress));
+			const CV_INFO_PDB70 *m_DebugPDBInfo = CH_R_CAST<CV_INFO_PDB70*>(m_ImageBuffer + this->RvaToOffset(m_DebugData->AddressOfRawData));
+	
+			this->m_DebugData = { (char*)m_DebugPDBInfo->PdbFileName, m_DebugPDBInfo->Signature, m_DebugPDBInfo->Age };
 		}
 
 		if (!m_ExportDataDirectory.VirtualAddress || !m_ExportDataDirectory.Size)
@@ -678,7 +693,7 @@ namespace chdr
 					continue;
 
 				char* m_szExportName = CH_R_CAST<char*>(m_CurrentName + CH_R_CAST<uintptr_t>(m_pExportDirectory) - m_ExportDataDirectory.VirtualAddress);
-				this->m_ExportData.push_back({ m_szExportName, m_pFunctionAddress[m_CurrentOrdinal], m_CurrentOrdinal });
+				this->m_ExportData.push_back({m_szExportName, m_pFunctionAddress[m_CurrentOrdinal], m_CurrentOrdinal});
 			}
 		}
 
@@ -704,7 +719,7 @@ namespace chdr
 					if (!(m_pThunkData->u1.Ordinal & IMAGE_ORDINAL_FLAG32))
 					{
 						// Read function name.
-						char* m_szFunctionName = CH_R_CAST<char*>(m_ImageBuffer + this->RvaToOffset((m_pThunkData->u1.AddressOfData + 2)));
+						char* m_szFunctionName = CH_R_CAST<char*>(m_ImageBuffer + this->RvaToOffset(m_pThunkData->u1.AddressOfData + 2));
 
 						// Cache desired data.
 						this->m_ImportData.push_back({ m_szModuleName, m_szFunctionName });
@@ -758,6 +773,7 @@ namespace chdr
 
 		IMAGE_DATA_DIRECTORY m_ExportDataDirectory = this->GetDataDirectory(IMAGE_DIRECTORY_ENTRY_EXPORT);
 		IMAGE_DATA_DIRECTORY m_ImportDataDirectory = this->GetDataDirectory(IMAGE_DIRECTORY_ENTRY_IMPORT);
+		IMAGE_DATA_DIRECTORY m_DebugDataDirectory = this->GetDataDirectory(IMAGE_DIRECTORY_ENTRY_DEBUG);
 
 		if (this->m_pNTHeaders->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC)
 		{
@@ -765,6 +781,7 @@ namespace chdr
 			const PIMAGE_NT_HEADERS32 m_NT32Temporary = CH_R_CAST<PIMAGE_NT_HEADERS32>(this->m_pNTHeaders);
 			m_ExportDataDirectory = m_NT32Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
 			m_ImportDataDirectory = m_NT32Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+			m_DebugDirectory = m_NT32Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG];
 #endif
 		}
 		else if (this->m_pNTHeaders->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
@@ -773,7 +790,20 @@ namespace chdr
 			const PIMAGE_NT_HEADERS64 m_NT64Temporary = CH_R_CAST<PIMAGE_NT_HEADERS64>(this->m_pNTHeaders);
 			m_ExportDataDirectory = m_NT64Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
 			m_ImportDataDirectory = m_NT64Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+			m_DebugDataDirectory = m_NT64Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG];
 #endif
+	}
+
+		if (!m_DebugDataDirectory.VirtualAddress || !m_DebugDataDirectory.Size)
+		{
+			CH_LOG("Debug table didn't exist for current region. 0x%x | 0X%x", m_DebugDataDirectory.VirtualAddress, m_DebugDataDirectory.Size);
+		}
+		else // Debug table parsing.
+		{
+			const IMAGE_DEBUG_DIRECTORY m_DebugData = m_Process.Read<IMAGE_DEBUG_DIRECTORY>(m_BaseAddress + m_DebugDataDirectory.VirtualAddress);
+			const CV_INFO_PDB70 m_DebugPDBInfo = m_Process.Read<CV_INFO_PDB70>(m_BaseAddress + m_DebugData.AddressOfRawData);
+
+			this->m_DebugData = { (char*)m_DebugPDBInfo.PdbFileName, m_DebugPDBInfo.Signature, m_DebugPDBInfo.Age };
 		}
 
 		if (!m_ExportDataDirectory.VirtualAddress || !m_ExportDataDirectory.Size)
