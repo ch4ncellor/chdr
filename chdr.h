@@ -49,15 +49,15 @@ namespace chdr
 		struct SectionData_t
 		{
 			std::string m_szSectionName = "";
-			DWORD		m_dSectionAddress = 0;
-			DWORD		m_dSectionSize = 0;
-			DWORD		m_dSectionCharacteristics = 0;
+			DWORD		m_dSectionAddress = NULL;
+			DWORD		m_dSectionSize = NULL;
+			DWORD		m_dSectionCharacteristics = NULL;
 		};
 
 		struct ExportData_t
 		{
 			std::string m_szExportName = "";
-			uint32_t    m_dExportAddress = 0;
+			std::uint32_t    m_dExportAddress = 0;
 			DWORD		m_dOrdinalNumber = 0;
 		};
 
@@ -75,8 +75,6 @@ namespace chdr
 		PIMAGE_DOS_HEADER        m_pDOSHeaders = { 0 };
 		PIMAGE_NT_HEADERS        m_pNTHeaders = { 0 };
 
-		DWORD					 m_dExportedFunctionCount = 0;
-
 		bool					 m_bIsValidInternal = false;
 	public:
 
@@ -87,7 +85,7 @@ namespace chdr
 		PEHeaderData_t(std::uint8_t* m_ImageBuffer, std::size_t m_ImageSize);
 
 		// Parsing data out of this image's process.
-		PEHeaderData_t(Process_t& m_Process, std::uintptr_t m_dCustomBaseAddress = NULL);
+		PEHeaderData_t(Process_t& m_Process, std::uintptr_t m_CustomBaseAddress = NULL);
 
 	public:
 
@@ -100,6 +98,9 @@ namespace chdr
 		// Helper function to get NT headers of PE image.
 		PIMAGE_NT_HEADERS GetNTHeader();
 
+		// Helper function to get specific data directory of PE image.
+		IMAGE_DATA_DIRECTORY GetDataDirectory(std::size_t m_nDirIndex);
+
 		// Helper function to get section data of PE image.
 		std::vector<SectionData_t> GetSectionData();
 
@@ -110,10 +111,13 @@ namespace chdr
 		std::vector<ImportData_t> GetImportData();
 
 		// Convert relative virtual address to file offset.
-		DWORD RvaToOffset(DWORD Rva);
+		std::uint32_t RvaToOffset(std::uint32_t m_dRva);
 
 		// Convert file offset to relative virtual address.
-		DWORD OffsetToRva(DWORD Rva);
+		std::uint32_t OffsetToRva(std::uint32_t m_dOffset);
+
+		// Get certain section by address in memory.
+		SectionData_t GetSectionByAddress(std::int32_t m_nAddress);
 	};
 
 	// PE Image utility helpers
@@ -291,10 +295,10 @@ namespace chdr
 		Process_t() { }
 
 		// Get target proces by name.
-		Process_t(const wchar_t* m_wszProcessName, DWORD m_dDesiredAccess = NULL);
+		Process_t(const wchar_t* m_wszProcessName, DWORD m_dDesiredAccess = PROCESS_ALL_ACCESS);
 
 		// Get target proces by PID.
-		Process_t(DWORD m_nProcessID, DWORD m_dDesiredAccess = NULL);
+		Process_t(DWORD m_nProcessID, DWORD m_dDesiredAccess = PROCESS_ALL_ACCESS);
 
 		// Get target proces by HANDLE.
 		Process_t(HANDLE m_hProcessHandle);
