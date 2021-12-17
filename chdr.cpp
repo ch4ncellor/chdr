@@ -4,7 +4,7 @@
 namespace chdr
 {
 	// Get target proces by name.
-	Process_t::Process_t(const wchar_t* m_wszProcessName, PEHeaderData_t::PEHEADER_PARSING_TYPE m_ParseType, DWORD m_dDesiredAccess)
+	Process_t::Process_t(const wchar_t* m_wszProcessName, std::int32_t m_ParseType, DWORD m_dDesiredAccess)
 	{
 		HANDLE m_hSnapShot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, NULL);
 
@@ -36,7 +36,7 @@ namespace chdr
 	}
 
 	// Get target proces by PID.
-	Process_t::Process_t(DWORD m_nProcessID, PEHeaderData_t::PEHEADER_PARSING_TYPE m_ParseType, DWORD m_dDesiredAccess)
+	Process_t::Process_t(DWORD m_nProcessID, std::int32_t m_ParseType, DWORD m_dDesiredAccess)
 	{
 		this->m_nTargetProcessID = m_nProcessID;
 		this->m_hTargetProcessHandle = OpenProcess(m_dDesiredAccess, false, this->m_nTargetProcessID);
@@ -54,7 +54,7 @@ namespace chdr
 	}
 
 	// Get target proces by HANDLE.
-	Process_t::Process_t(HANDLE m_hProcessHandle, PEHeaderData_t::PEHEADER_PARSING_TYPE m_ParseType)
+	Process_t::Process_t(HANDLE m_hProcessHandle, std::int32_t m_ParseType)
 	{
 		this->m_hTargetProcessHandle = m_hProcessHandle;
 		this->m_nTargetProcessID = GetProcessId(this->m_hTargetProcessHandle);
@@ -118,10 +118,10 @@ namespace chdr
 	{
 		for (auto& CurrentModule : this->EnumerateModules(true))
 		{
-			if (strcmp(CurrentModule.m_szModuleName.c_str(), this->m_szProcessName.c_str()) != 0)
+			if (strcmp(CurrentModule.m_szName.c_str(), this->m_szProcessName.c_str()) != 0)
 				continue;
 
-			return CurrentModule.m_dModuleBaseAddress;
+			return CurrentModule.m_BaseAddress;
 		}
 		return NULL;
 	}
@@ -444,7 +444,7 @@ namespace chdr
 			std::string m_szModuleName(m_bszPreModuleName);
 
 			this->m_EnumeratedModulesCached.push_back(
-				{ m_szModuleName, m_szModulePath, mEntry.modBaseSize, CH_R_CAST<std::uintptr_t>(mEntry.modBaseAddr) }
+				{ m_szModuleName, m_szModulePath, (std::uint16_t)mEntry.modBaseSize, CH_R_CAST<std::uintptr_t>(mEntry.modBaseAddr) }
 			);
 		}
 
@@ -607,7 +607,7 @@ namespace chdr
 namespace chdr
 {
 	// Parsing data out of this image's buffer.
-	PEHeaderData_t::PEHeaderData_t(std::uint8_t* m_ImageBuffer, std::size_t m_ImageSize, PEHEADER_PARSING_TYPE m_ParseType)
+	PEHeaderData_t::PEHeaderData_t(std::uint8_t* m_ImageBuffer, std::size_t m_ImageSize, std::int32_t m_ParseType)
 	{
 		if (m_ParseType & PEHEADER_PARSING_TYPE::TYPE_NONE)
 			return;
@@ -670,7 +670,7 @@ namespace chdr
 #endif
 		}
 
-		const bool bDebugEnabled = m_ParseType == PEHEADER_PARSING_TYPE::TYPE_DEBUG_DIRECTORY || m_ParseType == PEHEADER_PARSING_TYPE::TYPE_ALL;
+		const bool bDebugEnabled = m_ParseType & PEHEADER_PARSING_TYPE::TYPE_DEBUG_DIRECTORY || m_ParseType & PEHEADER_PARSING_TYPE::TYPE_ALL;
 		if (!bDebugEnabled ||
 			!m_DebugDataDirectory.VirtualAddress ||
 			!m_DebugDataDirectory.Size)
@@ -708,7 +708,7 @@ namespace chdr
 			}
 		}
 
-		const bool bExportsEnabled = m_ParseType == PEHEADER_PARSING_TYPE::TYPE_EXPORT_DIRECTORY || m_ParseType == PEHEADER_PARSING_TYPE::TYPE_ALL;
+		const bool bExportsEnabled = m_ParseType & PEHEADER_PARSING_TYPE::TYPE_EXPORT_DIRECTORY || m_ParseType & PEHEADER_PARSING_TYPE::TYPE_ALL;
 		if (!bExportsEnabled ||
 			!m_ExportDataDirectory.VirtualAddress ||
 			!m_ExportDataDirectory.Size)
@@ -739,7 +739,7 @@ namespace chdr
 			}
 		}
 
-		const bool bImportsEnabled = m_ParseType == PEHEADER_PARSING_TYPE::TYPE_IMPORT_DIRECTORY || m_ParseType == PEHEADER_PARSING_TYPE::TYPE_ALL;
+		const bool bImportsEnabled = m_ParseType & PEHEADER_PARSING_TYPE::TYPE_IMPORT_DIRECTORY || m_ParseType & PEHEADER_PARSING_TYPE::TYPE_ALL;
 		if (!bImportsEnabled ||
 			!m_ImportDataDirectory.VirtualAddress ||
 			!m_ImportDataDirectory.Size)
@@ -779,7 +779,7 @@ namespace chdr
 	}
 
 	// Parsing data out of this image's process.
-	PEHeaderData_t::PEHeaderData_t(Process_t& m_Process, PEHEADER_PARSING_TYPE m_ParseType, std::uintptr_t m_CustomBaseAddress)
+	PEHeaderData_t::PEHeaderData_t(Process_t& m_Process, std::int32_t m_ParseType, std::uintptr_t m_CustomBaseAddress)
 	{
 		if (m_ParseType & PEHEADER_PARSING_TYPE::TYPE_NONE)
 			return;
@@ -842,7 +842,7 @@ namespace chdr
 #endif
 		}
 
-		const bool bDebugEnabled = m_ParseType == PEHEADER_PARSING_TYPE::TYPE_DEBUG_DIRECTORY || m_ParseType == PEHEADER_PARSING_TYPE::TYPE_ALL;
+		const bool bDebugEnabled = m_ParseType & PEHEADER_PARSING_TYPE::TYPE_DEBUG_DIRECTORY || m_ParseType & PEHEADER_PARSING_TYPE::TYPE_ALL;
 		if (!bDebugEnabled ||
 			!m_DebugDataDirectory.VirtualAddress ||
 			!m_DebugDataDirectory.Size)
@@ -880,7 +880,7 @@ namespace chdr
 			}
 		}
 
-		const bool bExportsEnabled = m_ParseType == PEHEADER_PARSING_TYPE::TYPE_EXPORT_DIRECTORY || m_ParseType == PEHEADER_PARSING_TYPE::TYPE_ALL;
+		const bool bExportsEnabled = m_ParseType & PEHEADER_PARSING_TYPE::TYPE_EXPORT_DIRECTORY || m_ParseType & PEHEADER_PARSING_TYPE::TYPE_ALL;
 		if (!bExportsEnabled ||
 			!m_ExportDataDirectory.VirtualAddress ||
 			!m_ExportDataDirectory.Size)
@@ -930,7 +930,7 @@ namespace chdr
 			}
 		}
 
-		const bool bImportsEnabled = m_ParseType == PEHEADER_PARSING_TYPE::TYPE_IMPORT_DIRECTORY || m_ParseType == PEHEADER_PARSING_TYPE::TYPE_ALL;
+		const bool bImportsEnabled = m_ParseType & PEHEADER_PARSING_TYPE::TYPE_IMPORT_DIRECTORY || m_ParseType & PEHEADER_PARSING_TYPE::TYPE_ALL;
 		if (!bImportsEnabled ||
 			!m_ImportDataDirectory.VirtualAddress ||
 			!m_ImportDataDirectory.Size)
@@ -1079,7 +1079,7 @@ namespace chdr
 namespace chdr
 {
 	// Used for parsing PE's from file.
-	ImageFile_t::ImageFile_t(std::string m_szImagePath, PEHeaderData_t::PEHEADER_PARSING_TYPE m_ParseType)
+	ImageFile_t::ImageFile_t(std::string m_szImagePath, std::int32_t m_ParseType)
 	{
 		CH_ASSERT(true, std::filesystem::exists(m_szImagePath), "File at %s doesn't exist, or wasn't accessible.", m_szImagePath.c_str());
 
@@ -1093,7 +1093,7 @@ namespace chdr
 	}
 
 	// Used for parsing PE's from memory.
-	ImageFile_t::ImageFile_t(std::uint8_t* m_ImageBuffer, std::size_t m_nImageSize, PEHeaderData_t::PEHEADER_PARSING_TYPE m_ParseType)
+	ImageFile_t::ImageFile_t(std::uint8_t* m_ImageBuffer, std::size_t m_nImageSize, std::int32_t m_ParseType)
 	{
 		// Copy over to object-specific variable to possibly use later.
 		this->m_ImageBuffer.resize(m_nImageSize);
@@ -1316,15 +1316,15 @@ namespace chdr
 		for (auto& CurrentModule : m_Process.EnumerateModules(true))
 		{
 			// Too high.
-			if (m_dStartAddress < CurrentModule.m_dModuleBaseAddress)
+			if (m_dStartAddress < CurrentModule.m_BaseAddress)
 				continue;
 
 			// Too low.
-			if (m_dStartAddress > CurrentModule.m_dModuleBaseAddress + CurrentModule.m_dModuleSize)
+			if (m_dStartAddress > CurrentModule.m_BaseAddress + CurrentModule.m_nSize)
 				continue;
 
 			// Just right :).
-			return CurrentModule.m_szModuleName;
+			return CurrentModule.m_szName;
 		}
 		return "N/A (ERROR)";
 	}
@@ -1370,16 +1370,16 @@ namespace chdr
 namespace chdr
 {
 	// Setup module in process by (non-case sensitive) name. 
-	Module_t::Module_t(chdr::Process_t& m_Process, const char* m_szModuleName, PEHeaderData_t::PEHEADER_PARSING_TYPE m_ParseType)
+	Module_t::Module_t(chdr::Process_t& m_Process, const char* m_szModuleName, std::int32_t m_ParseType)
 	{
 		// Walk all loaded modules until we land on the wish module.
-		for (auto& CurrentModule : m_Process.EnumerateModules())
+		for (const auto& CurrentModule : m_Process.EnumerateModules())
 		{
-			if (strcmp(CurrentModule.m_szModuleName.c_str(), m_szModuleName) != 0)
+			if (strcmp(CurrentModule.m_szName.c_str(), m_szModuleName) != 0)
 				continue;
 
-			this->m_dModuleBaseAddress = CurrentModule.m_dModuleBaseAddress;
-			this->m_dModuleSize = CurrentModule.m_dModuleSize;
+			this->m_dModuleBaseAddress = CurrentModule.m_BaseAddress;
+			this->m_dModuleSize = CurrentModule.m_nSize;
 			break; // Found what we needed, exit loop.
 		}
 
@@ -1389,7 +1389,7 @@ namespace chdr
 	}
 
 	// Setup module in process by address in processes' memory space.
-	Module_t::Module_t(chdr::Process_t& m_Process, std::uintptr_t m_dModuleBaseAddress, DWORD m_dModuleSize, PEHeaderData_t::PEHEADER_PARSING_TYPE m_ParseType)
+	Module_t::Module_t(chdr::Process_t& m_Process, std::uintptr_t m_dModuleBaseAddress, DWORD m_dModuleSize, std::int32_t m_ParseType)
 	{
 		this->m_dModuleBaseAddress = m_dModuleBaseAddress;
 		this->m_dModuleSize = m_dModuleSize;
@@ -1397,7 +1397,7 @@ namespace chdr
 		this->SetupModule_Internal(m_Process);
 	}
 
-	void Module_t::SetupModule_Internal(chdr::Process_t& m_Process, PEHeaderData_t::PEHEADER_PARSING_TYPE m_ParseType)
+	void Module_t::SetupModule_Internal(chdr::Process_t& m_Process, std::int32_t m_ParseType)
 	{
 		// Ensure vector holding image buffer has sufficient size.
 		this->m_ModuleData.resize(this->m_dModuleSize);

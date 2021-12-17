@@ -49,18 +49,18 @@ namespace chdr
 		struct SectionData_t
 		{
 			std::string         m_szName = "";
-			std::uint32_t		m_Address = NULL;
-			std::uint32_t		m_Size = NULL;
-			std::uint32_t		m_Characteristics = NULL;
-			std::uint32_t		m_PointerToRawData = NULL;
-			std::uint32_t		m_SizeOfRawData = NULL;
+			std::uint32_t		m_Address = 0u;
+			std::uint32_t		m_Size = 0u;
+			std::uint32_t		m_Characteristics = 0u;
+			std::uint32_t		m_PointerToRawData = 0u;
+			std::uint32_t		m_SizeOfRawData = 0u;
 		};
 
 		struct ExportData_t
 		{
-			std::string     m_szExportName = "";
-			std::uint32_t   m_dExportAddress = 0;
-			std::uint16_t	m_dOrdinalNumber = 0;
+			std::string     m_szName = "";
+			std::uint32_t   m_nAddress = 0u;
+			std::uint16_t	m_nOrdinal = 0u;
 		};
 
 		struct ImportData_t
@@ -97,25 +97,24 @@ namespace chdr
 
 		bool					 m_bIsValidInternal = false;
 	public:
-		enum PEHEADER_PARSING_TYPE
+		enum PEHEADER_PARSING_TYPE : std::int32_t
 		{
-			TYPE_ALL = 0,
-			TYPE_NONE = 1,
-			TYPE_EXPORT_DIRECTORY = 2,
-			TYPE_IMPORT_DIRECTORY = 3,
-			TYPE_DEBUG_DIRECTORY = 4,
-			TYPE_SECTIONS = 5
+			TYPE_NONE             = (0 << 0),
+			TYPE_ALL              = (1 << 1),
+			TYPE_EXPORT_DIRECTORY = (1 << 2),
+			TYPE_IMPORT_DIRECTORY = (1 << 3),
+			TYPE_DEBUG_DIRECTORY  = (1 << 4),
+			TYPE_SECTIONS         = (1 << 5)
 		};
 	public:
-
 		// Default ctor
 		PEHeaderData_t() { }
 
 		// Parsing data out of this image's buffer.
-		PEHeaderData_t(std::uint8_t* m_ImageBuffer, std::size_t m_ImageSize, PEHEADER_PARSING_TYPE m_ParseType = PEHEADER_PARSING_TYPE::TYPE_ALL);
+		PEHeaderData_t(std::uint8_t* m_ImageBuffer, std::size_t m_ImageSize, std::int32_t m_ParseType = PEHEADER_PARSING_TYPE::TYPE_ALL);
 
 		// Parsing data out of this image's process.
-		PEHeaderData_t(Process_t& m_Process, PEHEADER_PARSING_TYPE m_ParseType = PEHEADER_PARSING_TYPE::TYPE_ALL, std::uintptr_t m_CustomBaseAddress = NULL);
+		PEHeaderData_t(Process_t& m_Process, std::int32_t m_ParseType = PEHEADER_PARSING_TYPE::TYPE_ALL, std::uintptr_t m_CustomBaseAddress = NULL);
 
 	public:
 
@@ -158,16 +157,16 @@ namespace chdr
 	// PE Image utility helpers
 	class ImageFile_t
 	{
+		PEHeaderData_t m_PEHeaderData = { };
 	public:
 
 		// Used for parsing PE's from file.
-		ImageFile_t(std::string m_szImagePath, PEHeaderData_t::PEHEADER_PARSING_TYPE m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL);
+		ImageFile_t(std::string m_szImagePath, std::int32_t m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL);
 
 		// Used for parsing PE's from memory.
-		ImageFile_t(std::uint8_t* m_ImageBuffer, std::size_t m_nImageSize, PEHeaderData_t::PEHEADER_PARSING_TYPE m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL);
+		ImageFile_t(std::uint8_t* m_ImageBuffer, std::size_t m_nImageSize, std::int32_t m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL);
 
 	public:
-		PEHeaderData_t m_PEHeaderData = { };
 		ByteArray_t    m_ImageBuffer;
 
 	public:
@@ -230,13 +229,13 @@ namespace chdr
 		Module_t() { }
 
 		// Setup module in process by (non-case sensitive) name. 
-		Module_t(chdr::Process_t& m_Process, const char* m_szModuleName, PEHeaderData_t::PEHEADER_PARSING_TYPE m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL);
+		Module_t(chdr::Process_t& m_Process, const char* m_szModuleName, std::int32_t m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL);
 
 		// Setup module in process by address in process. (plz pass correct data here :D)
-		Module_t(chdr::Process_t& m_Process, std::uintptr_t m_dModuleBaseAddress, DWORD m_dModuleSize, PEHeaderData_t::PEHEADER_PARSING_TYPE m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL);
+		Module_t(chdr::Process_t& m_Process, std::uintptr_t m_dModuleBaseAddress, DWORD m_dModuleSize, std::int32_t m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL);
 
 		// Ease of use for building constructors.
-		void SetupModule_Internal(chdr::Process_t& m_Process, PEHeaderData_t::PEHEADER_PARSING_TYPE m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL);
+		void SetupModule_Internal(chdr::Process_t& m_Process, std::int32_t m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL);
 	public:
 
 		// Helper function to get PE header data of target process.
@@ -330,13 +329,13 @@ namespace chdr
 		Process_t() { }
 
 		// Get target proces by name.
-		Process_t(const wchar_t* m_wszProcessName, PEHeaderData_t::PEHEADER_PARSING_TYPE m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL, DWORD m_dDesiredAccess = PROCESS_ALL_ACCESS);
+		Process_t(const wchar_t* m_wszProcessName, std::int32_t m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL, DWORD m_dDesiredAccess = PROCESS_ALL_ACCESS);
 
 		// Get target proces by PID.
-		Process_t(DWORD m_nProcessID, PEHeaderData_t::PEHEADER_PARSING_TYPE m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL, DWORD m_dDesiredAccess = PROCESS_ALL_ACCESS);
+		Process_t(DWORD m_nProcessID, std::int32_t m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL, DWORD m_dDesiredAccess = PROCESS_ALL_ACCESS);
 
 		// Get target proces by HANDLE.
-		Process_t(HANDLE m_hProcessHandle, PEHeaderData_t::PEHEADER_PARSING_TYPE m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL);
+		Process_t(HANDLE m_hProcessHandle, std::int32_t m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL);
 
 		// Default dtor
 		~Process_t();
@@ -501,10 +500,10 @@ namespace chdr
 		// Relevant information pertaining a target module.
 		struct ModuleInformation_t
 		{
-			std::string m_szModuleName = "";
-			std::string m_szModulePath = "";
-			DWORD		m_dModuleSize = 0;
-			std::uintptr_t m_dModuleBaseAddress = 0;
+			std::string    m_szName = "";
+			std::string	   m_szPath = "";
+			std::uint16_t  m_nSize = 0u;
+			std::uintptr_t m_BaseAddress = 0u;
 		};
 
 		// Caching all loaded modules in target process.
