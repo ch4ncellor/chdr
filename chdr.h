@@ -49,16 +49,18 @@ namespace chdr
 		struct SectionData_t
 		{
 			std::string m_szSectionName = "";
-			DWORD		m_dSectionAddress = NULL;
-			DWORD		m_dSectionSize = NULL;
-			DWORD		m_dSectionCharacteristics = NULL;
+			std::uint32_t		m_dSectionAddress = NULL;
+			std::uint32_t		m_dSectionSize = NULL;
+			std::uint32_t		m_dSectionCharacteristics = NULL;
+			std::uint32_t		m_dSectionPointerToRawData = NULL;
+			std::uint32_t		m_dSectionSizeOfRawData = NULL;
 		};
 
 		struct ExportData_t
 		{
-			std::string m_szExportName = "";
-			std::uint32_t    m_dExportAddress = 0;
-			DWORD		m_dOrdinalNumber = 0;
+			std::string     m_szExportName = "";
+			std::uint32_t   m_dExportAddress = 0;
+			std::uint16_t	m_dOrdinalNumber = 0;
 		};
 
 		struct ImportData_t
@@ -93,17 +95,29 @@ namespace chdr
 
 		bool					 m_bIsValidInternal = false;
 	public:
+		enum PEHEADER_PARSING_TYPE
+		{
+			TYPE_ALL = 0,
+			TYPE_NONE = 1,
+			TYPE_EXPORT_DIRECTORY = 2,
+			TYPE_IMPORT_DIRECTORY = 3,
+			TYPE_DEBUG_DIRECTORY = 4,
+			TYPE_SECTIONS = 5
+		};
+	public:
 
 		// Default ctor
 		PEHeaderData_t() { }
 
 		// Parsing data out of this image's buffer.
-		PEHeaderData_t(std::uint8_t* m_ImageBuffer, std::size_t m_ImageSize);
+		PEHeaderData_t(std::uint8_t* m_ImageBuffer, std::size_t m_ImageSize, PEHEADER_PARSING_TYPE m_ParseType = PEHEADER_PARSING_TYPE::TYPE_ALL);
 
 		// Parsing data out of this image's process.
-		PEHeaderData_t(Process_t& m_Process, std::uintptr_t m_CustomBaseAddress = NULL);
+		PEHeaderData_t(Process_t& m_Process, PEHEADER_PARSING_TYPE m_ParseType = PEHEADER_PARSING_TYPE::TYPE_ALL, std::uintptr_t m_CustomBaseAddress = NULL);
 
 	public:
+
+
 
 		// Ensure we found the target PE header.
 		bool IsValid();
@@ -126,10 +140,9 @@ namespace chdr
 		// Helper function to get imported functions' data of PE image.
 		std::vector<ImportData_t> GetImportData();
 
-		// Helper function to get debug directories data of PE image.
+		// Helper function to get debug directories' data of PE image.
 		DebugData_t GetDebugData();
 		
-
 		// Convert relative virtual address to file offset.
 		std::uint32_t RvaToOffset(std::uint32_t m_dRva);
 
@@ -146,10 +159,10 @@ namespace chdr
 	public:
 
 		// Used for parsing PE's from file.
-		ImageFile_t(std::string m_szImagePath);
+		ImageFile_t(std::string m_szImagePath, PEHeaderData_t::PEHEADER_PARSING_TYPE m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL);
 
 		// Used for parsing PE's from memory.
-		ImageFile_t(std::uint8_t* m_ImageBuffer, std::size_t m_nImageSize);
+		ImageFile_t(std::uint8_t* m_ImageBuffer, std::size_t m_nImageSize, PEHeaderData_t::PEHEADER_PARSING_TYPE m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL);
 
 	public:
 		PEHeaderData_t m_PEHeaderData = { };
@@ -215,13 +228,13 @@ namespace chdr
 		Module_t() { }
 
 		// Setup module in process by (non-case sensitive) name. 
-		Module_t(chdr::Process_t& m_Process, const char* m_szModuleName);
+		Module_t(chdr::Process_t& m_Process, const char* m_szModuleName, PEHeaderData_t::PEHEADER_PARSING_TYPE m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL);
 
 		// Setup module in process by address in process. (plz pass correct data here :D)
-		Module_t(chdr::Process_t& m_Process, std::uintptr_t m_dModuleBaseAddress, DWORD m_dModuleSize);
+		Module_t(chdr::Process_t& m_Process, std::uintptr_t m_dModuleBaseAddress, DWORD m_dModuleSize, PEHeaderData_t::PEHEADER_PARSING_TYPE m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL);
 
 		// Ease of use for building constructors.
-		void SetupModule_Internal(chdr::Process_t& m_Process);
+		void SetupModule_Internal(chdr::Process_t& m_Process, PEHeaderData_t::PEHEADER_PARSING_TYPE m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL);
 	public:
 
 		// Helper function to get PE header data of target process.
@@ -315,13 +328,13 @@ namespace chdr
 		Process_t() { }
 
 		// Get target proces by name.
-		Process_t(const wchar_t* m_wszProcessName, DWORD m_dDesiredAccess = PROCESS_ALL_ACCESS);
+		Process_t(const wchar_t* m_wszProcessName, PEHeaderData_t::PEHEADER_PARSING_TYPE m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL, DWORD m_dDesiredAccess = PROCESS_ALL_ACCESS);
 
 		// Get target proces by PID.
-		Process_t(DWORD m_nProcessID, DWORD m_dDesiredAccess = PROCESS_ALL_ACCESS);
+		Process_t(DWORD m_nProcessID, PEHeaderData_t::PEHEADER_PARSING_TYPE m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL, DWORD m_dDesiredAccess = PROCESS_ALL_ACCESS);
 
 		// Get target proces by HANDLE.
-		Process_t(HANDLE m_hProcessHandle);
+		Process_t(HANDLE m_hProcessHandle, PEHeaderData_t::PEHEADER_PARSING_TYPE m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL);
 
 		// Default dtor
 		~Process_t();
@@ -605,5 +618,6 @@ namespace chdr
 
 	namespace misc
 	{
+
 	}
 }
