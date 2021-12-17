@@ -631,7 +631,7 @@ namespace chdr
 		//}
 
 		PIMAGE_SECTION_HEADER m_pSectionHeaders = IMAGE_FIRST_SECTION(this->m_pNTHeaders);
-		for (std::size_t i = 0u; i < m_pNTHeaders->FileHeader.NumberOfSections; ++i)
+		for (std::size_t i = 0u; i < m_pNTHeaders->FileHeader.NumberOfSections; ++i, ++m_pSectionHeaders)
 		{
 			this->m_SectionData.push_back(
 				{ CH_R_CAST<char*>(m_pSectionHeaders->Name),
@@ -641,10 +641,10 @@ namespace chdr
 				m_pSectionHeaders->PointerToRawData,
 				m_pSectionHeaders->PointerToRawData }
 			);
-
-			// Move onto next section.
-			++m_pSectionHeaders;
 		}
+
+		for (std::size_t i = 0u; i < IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR/*Maximum*/; ++i)
+			this->m_DirectoryData.push_back(this->m_pNTHeaders->OptionalHeader.DataDirectory[i]);
 
 		// Gather all needed directories, then ensure we're using the correct type for the image.
 		IMAGE_DATA_DIRECTORY m_ExportDataDirectory = this->GetDataDirectory(IMAGE_DIRECTORY_ENTRY_EXPORT);
@@ -684,7 +684,27 @@ namespace chdr
 			if (m_DebugData->Type == IMAGE_DEBUG_TYPE_CODEVIEW)
 			{
 				const CV_INFO_PDB70* m_PDBInfo = CH_R_CAST<CV_INFO_PDB70*>(m_ImageBuffer + this->RvaToOffset(m_DebugData->AddressOfRawData));
-				this->m_DebugData = { (char*)m_PDBInfo->PdbFileName, m_PDBInfo->Signature, m_PDBInfo->Age };
+				
+				wchar_t m_GUIDStr[MAX_PATH];
+				if (StringFromGUID2(m_PDBInfo->Signature, m_GUIDStr, MAX_PATH))
+				{
+					m_GUIDStr[MAX_PATH - 1] = '\0';
+
+					// wchar_t->string
+					_bstr_t m_szPreGUIDStr(m_GUIDStr);
+
+					this->m_DebugData = {
+						(char*)m_PDBInfo->PdbFileName, std::string(m_szPreGUIDStr),
+						m_PDBInfo->Age, m_PDBInfo->CvSignature
+					};
+				}
+				else
+				{
+					this->m_DebugData = {
+						(char*)m_PDBInfo->PdbFileName, "",
+						m_PDBInfo->Age, m_PDBInfo->CvSignature
+					};
+				}
 			}
 		}
 
@@ -795,6 +815,9 @@ namespace chdr
 			);
 		}
 
+		for (std::size_t i = 0u; i < IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR/*Maximum*/; ++i)
+			this->m_DirectoryData.push_back(this->m_pNTHeaders->OptionalHeader.DataDirectory[i]);
+		
 		// Gather all needed directories, then ensure we're using the correct type for the image.
 		IMAGE_DATA_DIRECTORY m_ExportDataDirectory = this->GetDataDirectory(IMAGE_DIRECTORY_ENTRY_EXPORT);
 		IMAGE_DATA_DIRECTORY m_ImportDataDirectory = this->GetDataDirectory(IMAGE_DIRECTORY_ENTRY_IMPORT);
@@ -833,7 +856,27 @@ namespace chdr
 			if (m_DebugData.Type == IMAGE_DEBUG_TYPE_CODEVIEW)
 			{
 				const CV_INFO_PDB70 m_PDBInfo = m_Process.Read<CV_INFO_PDB70>(m_BaseAddress + m_DebugData.AddressOfRawData);
-				this->m_DebugData = { (char*)m_PDBInfo.PdbFileName, m_PDBInfo.Signature, m_PDBInfo.Age };
+
+				wchar_t m_GUIDStr[MAX_PATH];
+				if (StringFromGUID2(m_PDBInfo.Signature, m_GUIDStr, MAX_PATH))
+				{
+					m_GUIDStr[MAX_PATH - 1] = '\0';
+
+					// wchar_t->string
+					_bstr_t m_szPreGUIDStr(m_GUIDStr);
+
+					this->m_DebugData = {
+						(char*)m_PDBInfo.PdbFileName, std::string(m_szPreGUIDStr),
+						m_PDBInfo.Age, m_PDBInfo.CvSignature
+					};
+				}
+				else
+				{
+					this->m_DebugData = {
+						(char*)m_PDBInfo.PdbFileName, "",
+						m_PDBInfo.Age, m_PDBInfo.CvSignature
+					};
+				}
 			}
 		}
 
@@ -904,7 +947,6 @@ namespace chdr
 
 			for (std::size_t i = 0u; ; ++i)
 			{
-				// Move onto next descriptor.
 				const IMAGE_IMPORT_DESCRIPTOR m_pImportDescriptor = CH_R_CAST<PIMAGE_IMPORT_DESCRIPTOR>(m_ImpDescriptorBlock.get())[i];
 				if (!m_pImportDescriptor.Name)
 					break;
@@ -964,7 +1006,7 @@ namespace chdr
 			// Prevent user from doing an oopsie OOB read.
 			return {};
 
-		return this->m_pNTHeaders->OptionalHeader.DataDirectory[m_nDirIndex];
+		return this->m_DirectoryData[m_nDirIndex];
 	}
 
 	// Helper function to get section data of PE image.

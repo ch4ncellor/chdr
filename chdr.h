@@ -71,9 +71,10 @@ namespace chdr
 
 		struct DebugData_t
 		{
-			std::string m_szPDBPath = "";
-			GUID		m_GUIDSignature;
-			DWORD		m_Age = NULL;
+			std::string         m_szPDBPath = "";
+			std::string		    m_szGUIDSignature = "";
+			std::uint32_t		m_Age = 0u;
+			std::uint32_t		m_CVSignature = 0u;
 		};
 
 		// Only for PDB7.0 format!
@@ -88,6 +89,7 @@ namespace chdr
 		std::vector<SectionData_t> m_SectionData = { };
 		std::vector<ExportData_t> m_ExportData = { };
 		std::vector<ImportData_t> m_ImportData = { };
+		std::vector<IMAGE_DATA_DIRECTORY> m_DirectoryData = { };
 		DebugData_t				  m_DebugData  = { };
 
 		PIMAGE_DOS_HEADER        m_pDOSHeaders = { 0 };
