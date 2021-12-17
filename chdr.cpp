@@ -615,7 +615,7 @@ namespace chdr
 		CH_ASSERT(true, m_ImageBuffer && m_ImageSize, "Failed to read PE image.");
 
 		this->m_pDOSHeaders = CH_R_CAST<PIMAGE_DOS_HEADER>(m_ImageBuffer);
-		this->m_pNTHeaders  = CH_R_CAST<PIMAGE_NT_HEADERS>(m_ImageBuffer + this->m_pDOSHeaders->e_lfanew);
+		this->m_pNTHeaders = CH_R_CAST<PIMAGE_NT_HEADERS>(m_ImageBuffer + this->m_pDOSHeaders->e_lfanew);
 
 		this->m_bIsValidInternal =
 			this->m_pDOSHeaders->e_magic == IMAGE_DOS_SIGNATURE &&
@@ -672,11 +672,11 @@ namespace chdr
 
 		const bool bDebugEnabled = m_ParseType == PEHEADER_PARSING_TYPE::TYPE_DEBUG_DIRECTORY || m_ParseType == PEHEADER_PARSING_TYPE::TYPE_ALL;
 		if (!bDebugEnabled ||
-			!m_DebugDataDirectory.VirtualAddress || 
+			!m_DebugDataDirectory.VirtualAddress ||
 			!m_DebugDataDirectory.Size)
 		{
 			if (bDebugEnabled)
-			CH_LOG("Debug table didn't exist for current region. 0x%x | 0X%x", m_DebugDataDirectory.VirtualAddress, m_DebugDataDirectory.Size);
+				CH_LOG("Debug table didn't exist for current region. 0x%x | 0X%x", m_DebugDataDirectory.VirtualAddress, m_DebugDataDirectory.Size);
 		}
 		else // Debug table parsing.
 		{
@@ -689,11 +689,12 @@ namespace chdr
 		}
 
 		const bool bExportsEnabled = m_ParseType == PEHEADER_PARSING_TYPE::TYPE_EXPORT_DIRECTORY || m_ParseType == PEHEADER_PARSING_TYPE::TYPE_ALL;
-		if (!bExportsEnabled || !m_ExportDataDirectory.VirtualAddress ||
+		if (!bExportsEnabled ||
+			!m_ExportDataDirectory.VirtualAddress ||
 			!m_ExportDataDirectory.Size)
 		{
 			if (bExportsEnabled)
-			CH_LOG("Export table didn't exist for current region. 0x%x | 0X%x", m_ExportDataDirectory.VirtualAddress, m_ExportDataDirectory.Size);
+				CH_LOG("Export table didn't exist for current region. 0x%x | 0X%x", m_ExportDataDirectory.VirtualAddress, m_ExportDataDirectory.Size);
 		}
 		else // Export table parsing.
 		{
@@ -722,8 +723,8 @@ namespace chdr
 		if (!bImportsEnabled || !m_ImportDataDirectory.VirtualAddress || !m_ImportDataDirectory.Size)
 		{
 			if (bImportsEnabled)
-			CH_LOG("Import table didn't exist for current region. 0x%X | 0x%X",
-				m_ImportDataDirectory.VirtualAddress, m_ImportDataDirectory.Size);
+				CH_LOG("Import table didn't exist for current region. 0x%X | 0x%X",
+					m_ImportDataDirectory.VirtualAddress, m_ImportDataDirectory.Size);
 		}
 		else // Import table parsing.
 		{
@@ -765,6 +766,9 @@ namespace chdr
 	// Parsing data out of this image's process.
 	PEHeaderData_t::PEHeaderData_t(Process_t& m_Process, PEHEADER_PARSING_TYPE m_ParseType, std::uintptr_t m_CustomBaseAddress)
 	{
+		if (m_ParseType & PEHEADER_PARSING_TYPE::TYPE_NONE)
+			return;
+
 		const std::uintptr_t m_BaseAddress = m_CustomBaseAddress != NULL ? m_CustomBaseAddress : m_Process.GetBaseAddress();
 		CH_ASSERT(true, m_BaseAddress, "Couldn't find base address of target process.");
 
@@ -826,7 +830,7 @@ namespace chdr
 			!m_DebugDataDirectory.Size)
 		{
 			if (bDebugEnabled)
-			CH_LOG("Debug table didn't exist for current region. 0x%x | 0X%x", m_DebugDataDirectory.VirtualAddress, m_DebugDataDirectory.Size);
+				CH_LOG("Debug table didn't exist for current region. 0x%x | 0X%x", m_DebugDataDirectory.VirtualAddress, m_DebugDataDirectory.Size);
 		}
 		else // Debug table parsing.
 		{
@@ -844,8 +848,8 @@ namespace chdr
 			!m_ExportDataDirectory.Size)
 		{
 			if (bExportsEnabled)
-			CH_LOG("Export table didn't exist for current region. 0x%x | 0X%x",
-				m_ExportDataDirectory.VirtualAddress, m_ExportDataDirectory.Size);
+				CH_LOG("Export table didn't exist for current region. 0x%x | 0X%x",
+					m_ExportDataDirectory.VirtualAddress, m_ExportDataDirectory.Size);
 		}
 		else // Export table parsing.
 		{
@@ -894,8 +898,8 @@ namespace chdr
 			!m_ImportDataDirectory.Size)
 		{
 			if (bImportsEnabled)
-			CH_LOG("Import table didn't exist for current region. 0x%X | 0x%X",
-				m_ImportDataDirectory.VirtualAddress, m_ImportDataDirectory.Size);
+				CH_LOG("Import table didn't exist for current region. 0x%X | 0x%X",
+					m_ImportDataDirectory.VirtualAddress, m_ImportDataDirectory.Size);
 		}
 		else // Import table parsing.
 		{
@@ -1028,7 +1032,7 @@ namespace chdr
 			// Too low.
 			if (m_nAddress < SectionData.m_dSectionAddress)
 				continue;
-			
+
 			// Too high.
 			if (m_nAddress > SectionData.m_dSectionAddress + SectionData.m_dSectionSize)
 				continue;
