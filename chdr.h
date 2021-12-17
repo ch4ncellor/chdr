@@ -48,12 +48,12 @@ namespace chdr
 	{
 		struct SectionData_t
 		{
-			std::string m_szSectionName = "";
-			std::uint32_t		m_dSectionAddress = NULL;
-			std::uint32_t		m_dSectionSize = NULL;
-			std::uint32_t		m_dSectionCharacteristics = NULL;
-			std::uint32_t		m_dSectionPointerToRawData = NULL;
-			std::uint32_t		m_dSectionSizeOfRawData = NULL;
+			std::string         m_szName = "";
+			std::uint32_t		m_Address = NULL;
+			std::uint32_t		m_Size = NULL;
+			std::uint32_t		m_Characteristics = NULL;
+			std::uint32_t		m_PointerToRawData = NULL;
+			std::uint32_t		m_SizeOfRawData = NULL;
 		};
 
 		struct ExportData_t

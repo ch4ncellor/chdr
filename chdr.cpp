@@ -700,9 +700,9 @@ namespace chdr
 		{
 			const PIMAGE_EXPORT_DIRECTORY m_pExportDirectory = CH_R_CAST<PIMAGE_EXPORT_DIRECTORY>(m_ImageBuffer + this->RvaToOffset(m_ExportDataDirectory.VirtualAddress));
 
-			std::uint16_t* m_pOrdinalAddress = CH_R_CAST<std::uint16_t*>(m_ImageBuffer + this->RvaToOffset(m_pExportDirectory->AddressOfNameOrdinals));
-			std::uint32_t* m_pNamesAddress = CH_R_CAST<std::uint32_t*>(m_ImageBuffer + this->RvaToOffset(m_pExportDirectory->AddressOfNames));
-			std::uint32_t* m_pFunctionAddress = CH_R_CAST<std::uint32_t*>(m_ImageBuffer + this->RvaToOffset(m_pExportDirectory->AddressOfFunctions));
+			const std::uint16_t* m_pOrdinalAddress = CH_R_CAST<std::uint16_t*>(m_ImageBuffer + this->RvaToOffset(m_pExportDirectory->AddressOfNameOrdinals));
+			const std::uint32_t* m_pNamesAddress = CH_R_CAST<std::uint32_t*>(m_ImageBuffer + this->RvaToOffset(m_pExportDirectory->AddressOfNames));
+			const std::uint32_t* m_pFunctionAddress = CH_R_CAST<std::uint32_t*>(m_ImageBuffer + this->RvaToOffset(m_pExportDirectory->AddressOfFunctions));
 
 			// Traverse export table and cache desired data.
 			for (std::size_t i = 0u; i < m_pExportDirectory->NumberOfNames; ++i)
@@ -720,7 +720,9 @@ namespace chdr
 		}
 
 		const bool bImportsEnabled = m_ParseType == PEHEADER_PARSING_TYPE::TYPE_IMPORT_DIRECTORY || m_ParseType == PEHEADER_PARSING_TYPE::TYPE_ALL;
-		if (!bImportsEnabled || !m_ImportDataDirectory.VirtualAddress || !m_ImportDataDirectory.Size)
+		if (!bImportsEnabled ||
+			!m_ImportDataDirectory.VirtualAddress ||
+			!m_ImportDataDirectory.Size)
 		{
 			if (bImportsEnabled)
 				CH_LOG("Import table didn't exist for current region. 0x%X | 0x%X",
@@ -730,35 +732,28 @@ namespace chdr
 		{
 			PIMAGE_IMPORT_DESCRIPTOR m_pImportDescriptor = CH_R_CAST<PIMAGE_IMPORT_DESCRIPTOR>(m_ImageBuffer + this->RvaToOffset(m_ImportDataDirectory.VirtualAddress));
 
-			while (m_pImportDescriptor->Name)
+			for (; m_pImportDescriptor->Name; ++m_pImportDescriptor)
 			{
 				// Read module name.
 				char* m_szModuleName = CH_R_CAST<char*>(m_ImageBuffer + this->RvaToOffset(m_pImportDescriptor->Name));
 
-				std::size_t m_nThunkOffset = m_pImportDescriptor->OriginalFirstThunk ? m_pImportDescriptor->OriginalFirstThunk : m_pImportDescriptor->FirstThunk;
+				std::size_t m_nThunkOffset = m_pImportDescriptor->OriginalFirstThunk ?
+					m_pImportDescriptor->OriginalFirstThunk : m_pImportDescriptor->FirstThunk;
+
 				PIMAGE_THUNK_DATA m_pThunkData = CH_R_CAST<PIMAGE_THUNK_DATA>(m_ImageBuffer + this->RvaToOffset(m_nThunkOffset));
 
-				while (m_pThunkData->u1.AddressOfData)
+				for (; m_pThunkData->u1.AddressOfData; ++m_pThunkData)
 				{
-					if (!(m_pThunkData->u1.Ordinal & IMAGE_ORDINAL_FLAG32))
-					{
-						// Read function name.
-						char* m_szFunctionName = CH_R_CAST<char*>(m_ImageBuffer + this->RvaToOffset(m_pThunkData->u1.AddressOfData + 2));
-
-						// Cache desired data.
-						this->m_ImportData.push_back({ m_szModuleName, m_szFunctionName });
-					}
-					else
-					{
+					if (m_pThunkData->u1.Ordinal & IMAGE_ORDINAL_FLAG32)
 						// TODO: Imports by ordinal, dunno how I will make this nice.
-					}
+						continue;
 
-					// Move onto next thunk.
-					++m_pThunkData;
+					// Read function name.
+					char* m_szFunctionName = CH_R_CAST<char*>(m_ImageBuffer + this->RvaToOffset(m_pThunkData->u1.AddressOfData + 2));
+
+					// Cache desired data.
+					this->m_ImportData.push_back({ m_szModuleName, m_szFunctionName });
 				}
-
-				// Move onto next descriptor.
-				++m_pImportDescriptor;
 			}
 		}
 	}
@@ -903,46 +898,45 @@ namespace chdr
 		}
 		else // Import table parsing.
 		{
-			DWORD m_dDescriptorOffset = m_ImportDataDirectory.VirtualAddress;
-			IMAGE_IMPORT_DESCRIPTOR m_pImportDescriptor = m_Process.Read<IMAGE_IMPORT_DESCRIPTOR>(m_BaseAddress + m_dDescriptorOffset);
+			// Read whole descriptor block.
+			const auto m_ImpDescriptorBlock = std::make_unique<std::uint32_t[]>(m_ImportDataDirectory.Size);
+			m_Process.Read(m_BaseAddress + m_ImportDataDirectory.VirtualAddress, m_ImpDescriptorBlock.get(), m_ImportDataDirectory.Size);
 
-			while (m_pImportDescriptor.Name)
+			for (std::size_t i = 0u; ; ++i)
 			{
+				// Move onto next descriptor.
+				const IMAGE_IMPORT_DESCRIPTOR m_pImportDescriptor = CH_R_CAST<PIMAGE_IMPORT_DESCRIPTOR>(m_ImpDescriptorBlock.get())[i];
+				if (!m_pImportDescriptor.Name)
+					break;
+
 				// Read module name.
 				char m_szModuleName[MAX_PATH];
 				m_Process.Read(m_BaseAddress + m_pImportDescriptor.Name, m_szModuleName, sizeof(m_szModuleName));
 				m_szModuleName[MAX_PATH - 1] = '\0';
 
-				std::size_t m_nThunkOffset = m_pImportDescriptor.OriginalFirstThunk ? m_pImportDescriptor.OriginalFirstThunk : m_pImportDescriptor.FirstThunk;
-				IMAGE_THUNK_DATA m_pThunkData = m_Process.Read<IMAGE_THUNK_DATA>(m_BaseAddress + m_nThunkOffset);
+				std::size_t m_nThunkOffset = m_pImportDescriptor.OriginalFirstThunk ? 
+					m_pImportDescriptor.OriginalFirstThunk : m_pImportDescriptor.FirstThunk;
 
-				while (m_pThunkData.u1.AddressOfData)
+				for (std::size_t n = m_nThunkOffset; ; n += sizeof(IMAGE_THUNK_DATA32))
 				{
-					if (!(m_pThunkData.u1.Ordinal & IMAGE_ORDINAL_FLAG32))
-					{
-						// Read function name.
-						char m_szFunctionName[MAX_PATH];
-						m_Process.Read((m_BaseAddress + (m_pThunkData.u1.AddressOfData + 2)), m_szFunctionName, sizeof(m_szFunctionName));
-						m_szFunctionName[MAX_PATH - 1] = '\0';
+					IMAGE_THUNK_DATA m_pThunkData = m_Process.Read<IMAGE_THUNK_DATA>(m_BaseAddress + n);
+					if (!m_pThunkData.u1.AddressOfData)
+						break;
 
-						// Cache desired data.
-						this->m_ImportData.push_back({ m_szModuleName, m_szFunctionName });
-					}
-					else
-					{
+					if (m_pThunkData.u1.Ordinal & IMAGE_ORDINAL_FLAG32)
 						// TODO: Imports by ordinal, dunno how I will make this nice.
-					}
+						continue;
 
-					// Move onto next thunk.
-					m_nThunkOffset += sizeof(IMAGE_THUNK_DATA32);
-					m_pThunkData = m_Process.Read<IMAGE_THUNK_DATA>(m_BaseAddress + m_nThunkOffset);
+					// Read function name.
+					char m_szFunctionName[MAX_PATH];
+					m_Process.Read((m_BaseAddress + (m_pThunkData.u1.AddressOfData + 2)), m_szFunctionName, sizeof(m_szFunctionName));
+					m_szFunctionName[MAX_PATH - 1] = '\0';
+
+					// Cache desired data.
+					this->m_ImportData.push_back({ m_szModuleName, m_szFunctionName });
 				}
-
-				// Move onto next descriptor.
-				m_dDescriptorOffset += sizeof(IMAGE_IMPORT_DESCRIPTOR);
-				m_pImportDescriptor = m_Process.Read<IMAGE_IMPORT_DESCRIPTOR>(m_BaseAddress + m_dDescriptorOffset);
 			}
-		}
+		} 
 	}
 
 	// Ensure we found the target PE header.
@@ -1001,11 +995,11 @@ namespace chdr
 	{
 		for (const auto& SectionData : this->GetSectionData())
 		{
-			if (m_dRva < SectionData.m_dSectionAddress ||
-				m_dRva > SectionData.m_dSectionAddress + SectionData.m_dSectionSize)
+			if (m_dRva < SectionData.m_Address ||
+				m_dRva > SectionData.m_Address + SectionData.m_Size)
 				continue;
 
-			return SectionData.m_dSectionPointerToRawData + m_dRva - SectionData.m_dSectionAddress;
+			return SectionData.m_PointerToRawData + m_dRva - SectionData.m_Address;
 		}
 		return NULL;
 	}
@@ -1014,11 +1008,11 @@ namespace chdr
 	{
 		for (const auto& SectionData : this->GetSectionData())
 		{
-			if (m_dOffset < SectionData.m_dSectionPointerToRawData ||
-				m_dOffset > SectionData.m_dSectionAddress + SectionData.m_dSectionSize)
+			if (m_dOffset < SectionData.m_PointerToRawData ||
+				m_dOffset > SectionData.m_Address + SectionData.m_Size)
 				continue;
 
-			return SectionData.m_dSectionAddress + m_dOffset - SectionData.m_dSectionPointerToRawData;
+			return SectionData.m_Address + m_dOffset - SectionData.m_PointerToRawData;
 		}
 		return NULL;
 	}
@@ -1029,15 +1023,10 @@ namespace chdr
 		// Traverse all sections to find which one our address resides in.
 		for (const auto& SectionData : this->GetSectionData())
 		{
-			// Too low.
-			if (m_nAddress < SectionData.m_dSectionAddress)
+			if (m_nAddress < SectionData.m_Address ||							
+				m_nAddress > SectionData.m_Address + SectionData.m_Size) 
 				continue;
 
-			// Too high.
-			if (m_nAddress > SectionData.m_dSectionAddress + SectionData.m_dSectionSize)
-				continue;
-
-			// Just right. :)
 			return SectionData;
 		}
 		return {}; // Wtf. Couldn't find.
