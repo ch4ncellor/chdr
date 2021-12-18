@@ -26,6 +26,8 @@ namespace chdr
 		CH_ASSERT(true, this->m_hTargetProcessHandle && this->m_hTargetProcessHandle != INVALID_HANDLE_VALUE,
 			"Couldn't obtain valid HANDLE for process %ws", m_wszProcessName);
 
+		this->SetDebugPrivilege(true);
+
 		this->m_bShouldFreeHandleAtDestructor = this->m_hTargetProcessHandle && this->m_hTargetProcessHandle != INVALID_HANDLE_VALUE;
 		this->m_eProcessArchitecture = this->GetProcessArchitecture_Internal();
 
@@ -64,7 +66,7 @@ namespace chdr
 
 		this->m_szProcessPath = this->GetProcessPath_Internal();
 		this->m_szProcessName = this->GetProcessName_Internal();
-
+		
 		this->m_PEHeaderData = PEHeaderData_t(*this, m_ParseType);
 	}
 
@@ -515,7 +517,7 @@ namespace chdr
 		T m_pOutputRead;
 		if (!ReadProcessMemory(this->m_hTargetProcessHandle, (LPCVOID)m_ReadAddress, &m_pOutputRead, sizeof(T), NULL))
 		{
-			CH_LOG("Failed to read memory at addr 0x%X, with error code #%i.", m_ReadAddress, GetLastError());
+			CH_LOG("1 Failed to read memory at addr 0x%X, with error code #%i.", m_ReadAddress, GetLastError());
 		}
 
 		return m_pOutputRead;
@@ -525,10 +527,11 @@ namespace chdr
 	template <typename S>
 	std::size_t Process_t::Read(std::uintptr_t m_ReadAddress, S m_pBuffer, std::size_t m_nBufferSize)
 	{
-		SIZE_T m_nBytesRead = 0;
+		SIZE_T m_nBytesRead = 0u;
 		if (!ReadProcessMemory(this->m_hTargetProcessHandle, (LPCVOID)m_ReadAddress, m_pBuffer, m_nBufferSize, &m_nBytesRead))
 		{
-			CH_LOG("Failed to read memory at addr 0x%X, with error code #%d.", m_ReadAddress, GetLastError());
+			CH_LOG("2 Failed to read memory at addr 0x%X, with error code #%d.", m_ReadAddress, GetLastError());
+			m_nBytesRead = 0u;
 		}
 		return m_nBytesRead;
 	}
@@ -657,7 +660,7 @@ namespace chdr
 			const PIMAGE_NT_HEADERS32 m_NT32Temporary = CH_R_CAST<PIMAGE_NT_HEADERS32>(this->m_pNTHeaders);
 			m_ExportDataDirectory = m_NT32Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
 			m_ImportDataDirectory = m_NT32Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
-			m_DebugDirectory = m_NT32Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG];
+			m_DebugDataDirectory = m_NT32Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG];
 #endif
 		}
 		else if (this->m_pNTHeaders->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
@@ -757,7 +760,7 @@ namespace chdr
 				// Read module name.
 				char* m_szModuleName = CH_R_CAST<char*>(m_ImageBuffer + this->RvaToOffset(m_pImportDescriptor->Name));
 
-				std::size_t m_nThunkOffset = m_pImportDescriptor->OriginalFirstThunk ?
+				std::uint32_t m_nThunkOffset = m_pImportDescriptor->OriginalFirstThunk ?
 					m_pImportDescriptor->OriginalFirstThunk : m_pImportDescriptor->FirstThunk;
 
 				PIMAGE_THUNK_DATA m_pThunkData = CH_R_CAST<PIMAGE_THUNK_DATA>(m_ImageBuffer + this->RvaToOffset(m_nThunkOffset));
@@ -769,7 +772,7 @@ namespace chdr
 						continue;
 
 					// Read function name.
-					char* m_szFunctionName = CH_R_CAST<char*>(m_ImageBuffer + this->RvaToOffset(m_pThunkData->u1.AddressOfData + 2));
+					char* m_szFunctionName = CH_R_CAST<char*>(m_ImageBuffer + this->RvaToOffset(std::uint32_t(m_pThunkData->u1.AddressOfData + 2)));
 
 					// Cache desired data.
 					this->m_ImportData.push_back({ m_szModuleName, m_szFunctionName });
@@ -829,7 +832,7 @@ namespace chdr
 			const PIMAGE_NT_HEADERS32 m_NT32Temporary = CH_R_CAST<PIMAGE_NT_HEADERS32>(this->m_pNTHeaders);
 			m_ExportDataDirectory = m_NT32Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
 			m_ImportDataDirectory = m_NT32Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
-			m_DebugDirectory = m_NT32Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG];
+			m_DebugDataDirectory = m_NT32Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG];
 #endif
 		}
 		else if (this->m_pNTHeaders->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
@@ -896,11 +899,11 @@ namespace chdr
 			// Read whole RVA block.
 			const auto m_FuncRVABlock = std::make_unique<std::uint32_t[]>(m_pExportDirectory.NumberOfFunctions * sizeof(std::uint32_t));
 			m_Process.Read(m_BaseAddress + m_pExportDirectory.AddressOfFunctions, m_FuncRVABlock.get(), m_pExportDirectory.NumberOfFunctions * sizeof(std::uint32_t));
-
+		
 			// Read whole name block.
 			const auto m_NameRVABlock = std::make_unique<std::uint32_t[]>(m_pExportDirectory.NumberOfNames * sizeof(std::uint32_t));
 			m_Process.Read(m_BaseAddress + m_pExportDirectory.AddressOfNames, m_NameRVABlock.get(), m_pExportDirectory.NumberOfNames * sizeof(std::uint32_t));
-
+		
 			// Read whole ordinal block.
 			const auto m_OrdinalBlock = std::make_unique<std::uint16_t[]>(m_pExportDirectory.NumberOfNames * sizeof(std::uint16_t));
 			m_Process.Read(m_BaseAddress + m_pExportDirectory.AddressOfNameOrdinals, m_OrdinalBlock.get(), m_pExportDirectory.NumberOfNames * sizeof(std::uint16_t));
@@ -922,8 +925,12 @@ namespace chdr
 
 				// Read export name.
 				char m_szExportName[MAX_PATH];
-				m_Process.Read(m_BaseAddress + m_CurrentName, m_szExportName, sizeof(m_szExportName));
+				const std::size_t m_ReadNameBytes = m_Process.Read(m_BaseAddress + m_CurrentName, m_szExportName, sizeof(m_szExportName));
 				m_szExportName[MAX_PATH - 1] = '\0';
+
+				if (m_ReadNameBytes == 0u)
+					// Something went wrong while reading exp name, don't cache this.
+					continue;
 
 				// Cache desired data.
 				this->m_ExportData.push_back({ m_szExportName, m_pFuncBlock[m_CurrentOrdinal], m_CurrentOrdinal });
@@ -953,8 +960,12 @@ namespace chdr
 
 				// Read module name.
 				char m_szModuleName[MAX_PATH];
-				m_Process.Read(m_BaseAddress + m_pImportDescriptor.Name, m_szModuleName, sizeof(m_szModuleName));
+				const std::size_t m_nReadModuleName = m_Process.Read(m_BaseAddress + m_pImportDescriptor.Name, m_szModuleName, sizeof(m_szModuleName));
 				m_szModuleName[MAX_PATH - 1] = '\0';
+
+				if (m_nReadModuleName == 0u)
+					// Something went wrong while reading imp module, don't cache this.
+					continue;
 
 				std::size_t m_nThunkOffset = m_pImportDescriptor.OriginalFirstThunk ? 
 					m_pImportDescriptor.OriginalFirstThunk : m_pImportDescriptor.FirstThunk;
@@ -971,8 +982,12 @@ namespace chdr
 
 					// Read function name.
 					char m_szFunctionName[MAX_PATH];
-					m_Process.Read((m_BaseAddress + (m_pThunkData.u1.AddressOfData + 2)), m_szFunctionName, sizeof(m_szFunctionName));
+					const std::size_t m_ReadNameBytes = m_Process.Read(m_BaseAddress + std::uintptr_t(m_pThunkData.u1.AddressOfData) + 2, m_szFunctionName, sizeof(m_szFunctionName));
 					m_szFunctionName[MAX_PATH - 1] = '\0';
+
+					if (m_ReadNameBytes == 0u)
+						// Something went wrong while reading imp name, don't cache this.
+						continue;
 
 					// Cache desired data.
 					this->m_ImportData.push_back({ m_szModuleName, m_szFunctionName });
@@ -1060,7 +1075,7 @@ namespace chdr
 	}
 
 	// Get certain section by address in memory.
-	PEHeaderData_t::SectionData_t PEHeaderData_t::GetSectionByAddress(std::int32_t m_nAddress)
+	PEHeaderData_t::SectionData_t PEHeaderData_t::GetSectionByAddress(std::uint32_t m_nAddress)
 	{
 		// Traverse all sections to find which one our address resides in.
 		for (const auto& SectionData : this->GetSectionData())

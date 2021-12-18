@@ -13,7 +13,7 @@
 namespace chdr
 {
 
-#if 1
+#if 0
 #define SHOULD_PRINT_DEBUG_LOGS // Log errors/verbose information.
 #endif
 
@@ -151,7 +151,7 @@ namespace chdr
 		std::uint32_t OffsetToRva(std::uint32_t m_dOffset);
 
 		// Get certain section by address in memory.
-		SectionData_t GetSectionByAddress(std::int32_t m_nAddress);
+		SectionData_t GetSectionByAddress(std::uint32_t m_nAddress);
 	};
 
 	// PE Image utility helpers
