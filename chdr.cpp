@@ -829,7 +829,7 @@ namespace chdr
 			m_ExportDataDirectory = m_NT32Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
 			m_ImportDataDirectory = m_NT32Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
 			m_DebugDataDirectory = m_NT32Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG];
-			this->m_bIsMismatchedArchitecture = CH_S_CAST<std::uint32_t>(Process_t::eProcessArchitecture::ARCHITECTURE_x64); // For future notifications of dangerous actions.
+			this->m_nMismatchedArchitecture = CH_S_CAST<std::uint32_t>(Process_t::eProcessArchitecture::ARCHITECTURE_x64); // For future notifications of dangerous actions.
 #endif
 		}
 		else if (this->m_pNTHeaders->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
@@ -916,7 +916,7 @@ namespace chdr
 			{
 				if (m_nReadRVA == 0u || m_nReadName == 0u || m_nReadOrdinal == 0u)
 					// One or more read failed, no point to waste time here.
-					continue;
+					break;
 
 				const std::uint16_t m_CurrentOrdinal = m_pOrdinalBlock[i];
 				const std::uint32_t m_CurrentName = m_pNameBlock[i];
@@ -933,6 +933,8 @@ namespace chdr
 				if (m_ReadNameBytes == 0u)
 					// Something went wrong while reading exp name, don't cache this.
 					continue;
+
+				printf("sh: %s %i %X\n", m_szExportName, m_CurrentOrdinal, m_pFuncBlock[m_CurrentOrdinal]);
 
 				// Cache desired data.
 				this->m_ExportData.push_back({ m_szExportName, m_pFuncBlock[m_CurrentOrdinal], m_CurrentOrdinal });
