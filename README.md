@@ -1,5 +1,5 @@
  <p align="center"> 
- chdr-library (Cheddar 🧀)
+ chdr (Cheddar 🧀)
 </p>
 
 ---
