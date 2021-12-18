@@ -829,6 +829,7 @@ namespace chdr
 			m_ExportDataDirectory = m_NT32Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
 			m_ImportDataDirectory = m_NT32Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
 			m_DebugDataDirectory = m_NT32Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG];
+			this->m_bIsMismatchedArchitecture = CH_S_CAST<std::uint32_t>(Process_t::eProcessArchitecture::ARCHITECTURE_x64); // For future notifications of dangerous actions.
 #endif
 		}
 		else if (this->m_pNTHeaders->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
@@ -838,6 +839,7 @@ namespace chdr
 			m_ExportDataDirectory = m_NT64Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
 			m_ImportDataDirectory = m_NT64Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
 			m_DebugDataDirectory = m_NT64Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG];
+			this->m_nMismatchedArchitecture = CH_S_CAST<std::uint32_t>(Process_t::eProcessArchitecture::ARCHITECTURE_x64); // For future notifications of dangerous actions.
 #endif
 		}
 
@@ -1011,6 +1013,10 @@ namespace chdr
 	// Helper function to get NT headers of PE image.
 	PIMAGE_NT_HEADERS PEHeaderData_t::GetNTHeader()
 	{
+		if (this->m_nMismatchedArchitecture != 0u)
+			CH_LOG("Warning: Architecture of PE image was not expected by build type. Actual was 0x%X",
+				this->m_nMismatchedArchitecture);
+
 		return this->m_pNTHeaders;
 	}
 
@@ -1334,18 +1340,13 @@ namespace chdr
 		// But honestly, idc because it's so much faster than enumerating modules again..
 		for (auto& CurrentModule : m_Process.EnumerateModules(true))
 		{
-			// Too high.
-			if (m_dStartAddress < CurrentModule.m_BaseAddress)
+			if (m_dStartAddress < CurrentModule.m_BaseAddress ||
+				m_dStartAddress > CurrentModule.m_BaseAddress + CurrentModule.m_nSize)
 				continue;
 
-			// Too low.
-			if (m_dStartAddress > CurrentModule.m_BaseAddress + CurrentModule.m_nSize)
-				continue;
-
-			// Just right :).
 			return CurrentModule.m_szName;
 		}
-		return "N/A (ERROR)";
+		return "N/A";
 	}
 
 	// Ensure we found a HANDLE to the target thread.

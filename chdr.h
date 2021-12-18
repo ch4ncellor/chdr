@@ -96,6 +96,7 @@ namespace chdr
 		PIMAGE_NT_HEADERS        m_pNTHeaders = { 0 };
 
 		bool					 m_bIsValidInternal = false;
+		std::uint32_t			 m_nMismatchedArchitecture = false;
 	public:
 		enum PEHEADER_PARSING_TYPE : std::int32_t
 		{
