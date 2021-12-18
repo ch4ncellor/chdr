@@ -111,15 +111,12 @@ namespace chdr
 		PEHeaderData_t() { }
 
 		// Parsing data out of this image's buffer.
-		PEHeaderData_t(std::uint8_t* m_ImageBuffer, std::size_t m_ImageSize, std::int32_t m_ParseType = PEHEADER_PARSING_TYPE::TYPE_ALL);
+		PEHeaderData_t(std::uint8_t* m_ImageBuffer, std::size_t m_ImageSize, std::int32_t m_ParseType = PEHEADER_PARSING_TYPE::TYPE_NONE);
 
 		// Parsing data out of this image's process.
 		PEHeaderData_t(Process_t& m_Process, std::int32_t m_ParseType = PEHEADER_PARSING_TYPE::TYPE_ALL, std::uintptr_t m_CustomBaseAddress = NULL);
 
 	public:
-
-
-
 		// Ensure we found the target PE header.
 		bool IsValid();
 
@@ -161,7 +158,7 @@ namespace chdr
 	public:
 
 		// Used for parsing PE's from file.
-		ImageFile_t(std::string m_szImagePath, std::int32_t m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL);
+		ImageFile_t(const char *m_szImagePath, std::int32_t m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL);
 
 		// Used for parsing PE's from memory.
 		ImageFile_t(std::uint8_t* m_ImageBuffer, std::size_t m_nImageSize, std::int32_t m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL);
@@ -340,7 +337,7 @@ namespace chdr
 		// Default dtor
 		~Process_t();
 
-		enum class eManualMapInjectionFlags
+		enum class eManualMapInjectionFlags : std::int32_t
 		{
 			INJECTION_NONE = (0 << 0),
 			INJECTION_MODE_THREADHIJACK = (1 << 1),
@@ -350,7 +347,7 @@ namespace chdr
 			INJECTION_MAXIMUM = INJECTION_EXTRA_WIPEGARBAGESECTIONS + 1
 		};
 
-		enum class eProcessArchitecture
+		enum class eProcessArchitecture : std::int32_t
 		{
 			ARCHITECTURE_UNKNOWN = (0 << 0),
 			ARCHITECTURE_x64 = (1 << 6),
@@ -502,7 +499,7 @@ namespace chdr
 		{
 			std::string    m_szName = "";
 			std::string	   m_szPath = "";
-			std::uint16_t  m_nSize = 0u;
+			std::uint32_t  m_nSize = 0u;
 			std::uintptr_t m_BaseAddress = 0u;
 		};
 

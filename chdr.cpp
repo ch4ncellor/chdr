@@ -118,7 +118,7 @@ namespace chdr
 	{
 		for (auto& CurrentModule : this->EnumerateModules(true))
 		{
-			if (strcmp(CurrentModule.m_szName.c_str(), this->m_szProcessName.c_str()) != 0)
+			if (std::strcmp(CurrentModule.m_szName.c_str(), this->m_szProcessName.c_str()) != 0)
 				continue;
 
 			return CurrentModule.m_BaseAddress;
@@ -402,7 +402,9 @@ namespace chdr
 			CloseHandle(m_hThreadHandle);
 
 			m_EnumeratedThreads.push_back(
-				{ mEntry.th32ThreadID, m_dThreadStartAddress, m_bIsThreadSuspended }
+				{ mEntry.th32ThreadID, 
+				m_dThreadStartAddress, 
+				m_bIsThreadSuspended }
 			);
 		}
 
@@ -432,8 +434,8 @@ namespace chdr
 
 		while (Module32Next(m_hSnapShot, &mEntry))
 		{
-			WCHAR m_wszModPath[MAX_PATH];
-			if (!GetModuleFileNameEx(this->m_hTargetProcessHandle, mEntry.hModule, m_wszModPath, sizeof(m_wszModPath) / sizeof(WCHAR)))
+			wchar_t m_wszModPath[MAX_PATH];
+			if (!GetModuleFileNameEx(this->m_hTargetProcessHandle, mEntry.hModule, m_wszModPath, sizeof(m_wszModPath) / sizeof(wchar_t)))
 				continue;
 
 			// Convert wstring->string.
@@ -443,8 +445,10 @@ namespace chdr
 			std::string m_szModulePath(m_bszPreModulePath);
 			std::string m_szModuleName(m_bszPreModuleName);
 
-			this->m_EnumeratedModulesCached.push_back(
-				{ m_szModuleName, m_szModulePath, (std::uint16_t)mEntry.modBaseSize, CH_R_CAST<std::uintptr_t>(mEntry.modBaseAddr) }
+			this->m_EnumeratedModulesCached.push_back({
+				m_szModuleName, m_szModulePath,
+				CH_S_CAST<std::uint32_t>(mEntry.modBaseSize),
+				CH_R_CAST<std::uintptr_t>(mEntry.modBaseAddr) }
 			);
 		}
 
@@ -515,7 +519,7 @@ namespace chdr
 		T m_pOutputRead;
 		if (!ReadProcessMemory(this->m_hTargetProcessHandle, (LPCVOID)m_ReadAddress, &m_pOutputRead, sizeof(T), NULL))
 		{
-			CH_LOG("1 Failed to read memory at addr 0x%X, with error code #%i.", m_ReadAddress, GetLastError());
+			CH_LOG("Failed to read memory at addr 0x%X, with error code #%i.", m_ReadAddress, GetLastError());
 		}
 
 		return m_pOutputRead;
@@ -528,7 +532,7 @@ namespace chdr
 		SIZE_T m_nBytesRead = 0u;
 		if (!ReadProcessMemory(this->m_hTargetProcessHandle, (LPCVOID)m_ReadAddress, m_pBuffer, m_nBufferSize, &m_nBytesRead))
 		{
-			CH_LOG("2 Failed to read memory at addr 0x%X, with error code #%d.", m_ReadAddress, GetLastError());
+			CH_LOG("Failed to read memory at addr 0x%X, with error code #%d.", m_ReadAddress, GetLastError());
 			m_nBytesRead = 0u;
 		}
 		return m_nBytesRead;
@@ -625,12 +629,6 @@ namespace chdr
 		// Ensure image PE headers was valid.
 		CH_ASSERT(true, this->IsValid(), "Couldn't find MZ&NT header.");
 
-		// Probably wont implement, relying on this data alot elsewhere.
-		//if (m_ParseType & PEHEADER_PARSING_TYPE::TYPE_IMPORT_DIRECTORY || 
-		//	m_ParseType & PEHEADER_PARSING_TYPE::TYPE_ALL)
-		//{
-		//}
-
 		PIMAGE_SECTION_HEADER m_pSectionHeaders = IMAGE_FIRST_SECTION(this->m_pNTHeaders);
 		for (std::size_t i = 0u; i < m_pNTHeaders->FileHeader.NumberOfSections; ++i, ++m_pSectionHeaders)
 		{
@@ -687,7 +685,7 @@ namespace chdr
 				const CV_INFO_PDB70* m_PDBInfo = CH_R_CAST<CV_INFO_PDB70*>(m_ImageBuffer + this->RvaToOffset(m_DebugData->AddressOfRawData));
 				
 				wchar_t m_GUIDStr[MAX_PATH];
-				if (StringFromGUID2(m_PDBInfo->Signature, m_GUIDStr, MAX_PATH))
+				if (StringFromGUID2(m_PDBInfo->Signature, m_GUIDStr, sizeof(m_GUIDStr)))
 				{
 					m_GUIDStr[MAX_PATH - 1] = '\0';
 
@@ -859,7 +857,7 @@ namespace chdr
 				const CV_INFO_PDB70 m_PDBInfo = m_Process.Read<CV_INFO_PDB70>(m_BaseAddress + m_DebugData.AddressOfRawData);
 
 				wchar_t m_GUIDStr[MAX_PATH];
-				if (StringFromGUID2(m_PDBInfo.Signature, m_GUIDStr, MAX_PATH))
+				if (StringFromGUID2(m_PDBInfo.Signature, m_GUIDStr, sizeof(m_GUIDStr)))
 				{
 					m_GUIDStr[MAX_PATH - 1] = '\0';
 
@@ -896,15 +894,15 @@ namespace chdr
 
 			// Read whole RVA block.
 			const auto m_FuncRVABlock = std::make_unique<std::uint32_t[]>(m_pExportDirectory.NumberOfFunctions * sizeof(std::uint32_t));
-			m_Process.Read(m_BaseAddress + m_pExportDirectory.AddressOfFunctions, m_FuncRVABlock.get(), m_pExportDirectory.NumberOfFunctions * sizeof(std::uint32_t));
+			const std::size_t m_nReadRVA = m_Process.Read(m_BaseAddress + m_pExportDirectory.AddressOfFunctions, m_FuncRVABlock.get(), m_pExportDirectory.NumberOfFunctions * sizeof(std::uint32_t));
 		
 			// Read whole name block.
 			const auto m_NameRVABlock = std::make_unique<std::uint32_t[]>(m_pExportDirectory.NumberOfNames * sizeof(std::uint32_t));
-			m_Process.Read(m_BaseAddress + m_pExportDirectory.AddressOfNames, m_NameRVABlock.get(), m_pExportDirectory.NumberOfNames * sizeof(std::uint32_t));
+			const std::size_t m_nReadName = m_Process.Read(m_BaseAddress + m_pExportDirectory.AddressOfNames, m_NameRVABlock.get(), m_pExportDirectory.NumberOfNames * sizeof(std::uint32_t));
 		
 			// Read whole ordinal block.
 			const auto m_OrdinalBlock = std::make_unique<std::uint16_t[]>(m_pExportDirectory.NumberOfNames * sizeof(std::uint16_t));
-			m_Process.Read(m_BaseAddress + m_pExportDirectory.AddressOfNameOrdinals, m_OrdinalBlock.get(), m_pExportDirectory.NumberOfNames * sizeof(std::uint16_t));
+			const std::size_t m_nReadOrdinal = m_Process.Read(m_BaseAddress + m_pExportDirectory.AddressOfNameOrdinals, m_OrdinalBlock.get(), m_pExportDirectory.NumberOfNames * sizeof(std::uint16_t));
 
 			// Ye.
 			const std::uint32_t* m_pFuncBlock = m_FuncRVABlock.get();
@@ -914,6 +912,10 @@ namespace chdr
 			// Traverse export table and cache desired data.
 			for (std::size_t i = 0u; i < m_pExportDirectory.NumberOfNames; ++i)
 			{
+				if (m_nReadRVA == 0u || m_nReadName == 0u || m_nReadOrdinal == 0u)
+					// One or more read failed, no point to waste time here.
+					continue;
+
 				const std::uint16_t m_CurrentOrdinal = m_pOrdinalBlock[i];
 				const std::uint32_t m_CurrentName = m_pNameBlock[i];
 
@@ -1092,12 +1094,12 @@ namespace chdr
 namespace chdr
 {
 	// Used for parsing PE's from file.
-	ImageFile_t::ImageFile_t(std::string m_szImagePath, std::int32_t m_ParseType)
+	ImageFile_t::ImageFile_t(const char *m_szImagePath, std::int32_t m_ParseType)
 	{
-		CH_ASSERT(true, std::filesystem::exists(m_szImagePath), "File at %s doesn't exist, or wasn't accessible.", m_szImagePath.c_str());
+		CH_ASSERT(true, std::filesystem::exists(m_szImagePath), "File at %s doesn't exist, or wasn't accessible.", m_szImagePath);
 
 		// Fill image buffer.
-		std::ifstream m_fFile(m_szImagePath.c_str(), std::ios::binary);
+		std::ifstream m_fFile(m_szImagePath, std::ios::binary);
 		(&m_ImageBuffer)->assign((std::istreambuf_iterator<char>(m_fFile)), std::istreambuf_iterator<char>());
 		m_fFile.close();
 
@@ -1131,6 +1133,10 @@ namespace chdr
 	void ImageFile_t::WriteToFile(const char* m_szFilePath)
 	{
 		std::ofstream file(m_szFilePath, std::ios_base::out | std::ios_base::binary);
+		if (!file.is_open())
+			// Unable to setup desired file.
+			return;
+
 		file.write(CH_R_CAST<char*>(this->m_ImageBuffer.data()), this->m_ImageBuffer.size());
 		file.close();
 	}
@@ -1388,7 +1394,7 @@ namespace chdr
 		// Walk all loaded modules until we land on the wish module.
 		for (const auto& CurrentModule : m_Process.EnumerateModules())
 		{
-			if (strcmp(CurrentModule.m_szName.c_str(), m_szModuleName) != 0)
+			if (std::strcmp(CurrentModule.m_szName.c_str(), m_szModuleName) != 0)
 				continue;
 
 			this->m_dModuleBaseAddress = CurrentModule.m_BaseAddress;
@@ -1412,12 +1418,17 @@ namespace chdr
 
 	void Module_t::SetupModule_Internal(chdr::Process_t& m_Process, std::int32_t m_ParseType)
 	{
-		// Ensure vector holding image buffer has sufficient size.
-		this->m_ModuleData.resize(this->m_dModuleSize);
-
+		// Read whole module to our buffer in heap.
 		const auto m_ModuleDataTemp = std::make_unique<std::uint8_t[]>(this->m_dModuleSize);
-		m_Process.Read((this->m_dModuleBaseAddress), m_ModuleDataTemp.get(), this->m_dModuleSize);
-		std::memcpy(&this->m_ModuleData[0], m_ModuleDataTemp.get(), this->m_dModuleSize);
+		const std::size_t m_nReadBytes = m_Process.Read(this->m_dModuleBaseAddress, m_ModuleDataTemp.get(), this->m_dModuleSize);
+
+		CH_ASSERT(true, m_nReadBytes != 0u, "Failed to read image of desired module.");
+
+		// Ensure vector holding image buffer has sufficient size.
+		this->m_ModuleData.resize(m_nReadBytes);
+
+		// Copy over read data from this module.
+		std::memcpy(&this->m_ModuleData[0], m_ModuleDataTemp.get(), m_nReadBytes);
 
 		this->m_PEHeaderData = PEHeaderData_t(m_Process, m_ParseType, this->m_dModuleBaseAddress);
 	}
