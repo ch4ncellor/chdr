@@ -26,8 +26,6 @@ namespace chdr
 		CH_ASSERT(true, this->m_hTargetProcessHandle && this->m_hTargetProcessHandle != INVALID_HANDLE_VALUE,
 			"Couldn't obtain valid HANDLE for process %ws", m_wszProcessName);
 
-		this->SetDebugPrivilege(true);
-
 		this->m_bShouldFreeHandleAtDestructor = this->m_hTargetProcessHandle && this->m_hTargetProcessHandle != INVALID_HANDLE_VALUE;
 		this->m_eProcessArchitecture = this->GetProcessArchitecture_Internal();
 
