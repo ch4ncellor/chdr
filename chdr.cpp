@@ -260,7 +260,7 @@ namespace chdr
 		const std::uintptr_t m_TargetBaseAddress = this->Allocate(m_pNTHeaders->OptionalHeader.SizeOfImage/*0x1000*/, PAGE_EXECUTE_READWRITE);
 
 		// Copy over PE Header to target process.
-		if (!this->Write(m_TargetBaseAddress, m_ImageBuffer, m_pNTHeaders->OptionalHeader.SizeOfImage/*0x1000*/));
+		if (!this->Write(m_TargetBaseAddress, m_ImageBuffer, m_pNTHeaders->OptionalHeader.SizeOfImage/*0x1000*/))
 		{
 			CH_LOG("Couldn't copy over PE header data to target process.");
 			return false;
@@ -717,10 +717,10 @@ namespace chdr
 		}
 		else // Debug table parsing.
 		{
-			const PIMAGE_DEBUG_DIRECTORY m_DebugData = CH_R_CAST<PIMAGE_DEBUG_DIRECTORY>(m_ImageBuffer + this->RvaToOffset(m_DebugDataDirectory.VirtualAddress));
-			if (m_DebugData->Type == IMAGE_DEBUG_TYPE_CODEVIEW)
+			const PIMAGE_DEBUG_DIRECTORY m_DebugDirectoryData = CH_R_CAST<PIMAGE_DEBUG_DIRECTORY>(m_ImageBuffer + this->RvaToOffset(m_DebugDataDirectory.VirtualAddress));
+			if (m_DebugDirectoryData->Type == IMAGE_DEBUG_TYPE_CODEVIEW)
 			{
-				const CV_INFO_PDB70* m_PDBInfo = CH_R_CAST<CV_INFO_PDB70*>(m_ImageBuffer + this->RvaToOffset(m_DebugData->AddressOfRawData));
+				const CV_INFO_PDB70* m_PDBInfo = CH_R_CAST<CV_INFO_PDB70*>(m_ImageBuffer + this->RvaToOffset(m_DebugDirectoryData->AddressOfRawData));
 				
 				wchar_t m_GUIDStr[MAX_PATH];
 				if (StringFromGUID2(m_PDBInfo->Signature, m_GUIDStr, sizeof(m_GUIDStr)))
@@ -891,10 +891,10 @@ namespace chdr
 		}
 		else // Debug table parsing.
 		{
-			const IMAGE_DEBUG_DIRECTORY m_DebugData = m_Process.Read<IMAGE_DEBUG_DIRECTORY>(m_BaseAddress + m_DebugDataDirectory.VirtualAddress);
-			if (m_DebugData.Type == IMAGE_DEBUG_TYPE_CODEVIEW)
+			const IMAGE_DEBUG_DIRECTORY m_DebugDirectoryData = m_Process.Read<IMAGE_DEBUG_DIRECTORY>(m_BaseAddress + m_DebugDataDirectory.VirtualAddress);
+			if (m_DebugDirectoryData.Type == IMAGE_DEBUG_TYPE_CODEVIEW)
 			{
-				const CV_INFO_PDB70 m_PDBInfo = m_Process.Read<CV_INFO_PDB70>(m_BaseAddress + m_DebugData.AddressOfRawData);
+				const CV_INFO_PDB70 m_PDBInfo = m_Process.Read<CV_INFO_PDB70>(m_BaseAddress + m_DebugDirectoryData.AddressOfRawData);
 
 				wchar_t m_GUIDStr[MAX_PATH];
 				if (StringFromGUID2(m_PDBInfo.Signature, m_GUIDStr, sizeof(m_GUIDStr)))
@@ -971,8 +971,6 @@ namespace chdr
 				if (m_ReadNameBytes == 0u)
 					// Something went wrong while reading exp name, don't cache this.
 					continue;
-
-				printf("sh: %s %i %X\n", m_szExportName, m_CurrentOrdinal, m_pFuncBlock[m_CurrentOrdinal]);
 
 				// Cache desired data.
 				this->m_ExportData[m_szExportName] = { m_pFuncBlock[m_CurrentOrdinal], m_CurrentOrdinal };
@@ -1457,7 +1455,7 @@ namespace chdr
 
 		CH_ASSERT(true, this->m_dModuleBaseAddress && this->m_dModuleSize, "Couldn't find desired module %s", m_szModuleName);
 
-		this->SetupModule_Internal(m_Process);
+		this->SetupModule_Internal(m_Process, m_ParseType);
 	}
 
 	// Setup module in process by address in processes' memory space.
@@ -1466,7 +1464,7 @@ namespace chdr
 		this->m_dModuleBaseAddress = m_dModuleBaseAddress;
 		this->m_dModuleSize = m_dModuleSize;
 
-		this->SetupModule_Internal(m_Process);
+		this->SetupModule_Internal(m_Process, m_ParseType);
 	}
 
 	void Module_t::SetupModule_Internal(chdr::Process_t& m_Process, std::int32_t m_ParseType)
