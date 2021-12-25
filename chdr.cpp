@@ -36,7 +36,7 @@ namespace chdr
 	}
 
 	// Get target proces by PID.
-	Process_t::Process_t(DWORD m_nProcessID, std::int32_t m_ParseType, DWORD m_dDesiredAccess)
+	Process_t::Process_t(std::uint32_t m_nProcessID, std::int32_t m_ParseType, DWORD m_dDesiredAccess)
 	{
 		this->m_nTargetProcessID = m_nProcessID;
 		this->m_hTargetProcessHandle = OpenProcess(m_dDesiredAccess, false, this->m_nTargetProcessID);
@@ -64,7 +64,7 @@ namespace chdr
 
 		this->m_szProcessPath = this->GetProcessPath_Internal();
 		this->m_szProcessName = this->GetProcessName_Internal();
-		
+
 		this->m_PEHeaderData = PEHeaderData_t(*this, m_ParseType);
 	}
 
@@ -82,7 +82,7 @@ namespace chdr
 	}
 
 	// The process ID of the target process. (lol)
-	DWORD Process_t::GetProcessID()
+	std::uint32_t Process_t::GetProcessID()
 	{
 		return this->m_nTargetProcessID;
 	}
@@ -214,14 +214,9 @@ namespace chdr
 	// The PEB of the target process.
 	PEB Process_t::GetPEB()
 	{
-		const HMODULE m_hNTDLL = GetModuleHandleA("ntdll.dll");
-		if (!m_hNTDLL)
-		{
-			CH_LOG("Couldn't find loaded module ntdll!");
-			return {};
-		}
-
-		NtQueryInformationProcess_fn NtQueryInformationProcess = CH_R_CAST<NtQueryInformationProcess_fn>(GetProcAddress(m_hNTDLL, "NtQueryInformationProcess"));
+		NtQueryInformationProcess_fn NtQueryInformationProcess =
+			CH_R_CAST<NtQueryInformationProcess_fn>(GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtQueryInformationProcess"));
+	
 		PROCESS_BASIC_INFORMATION m_ProcessBasicInformation;
 
 		// Get address where PEB resides in this target process.
@@ -280,11 +275,11 @@ namespace chdr
 		}
 
 		// Data to pass through our shellcode.
-		struct LoaderData_t { 
-			std::uintptr_t m_ModuleBase = 0u, m_LoadLibrary = 0u, m_GetProcAddress = 0u; 
+		struct LoaderData_t {
+			std::uintptr_t m_ModuleBase = 0u, m_LoadLibrary = 0u, m_GetProcAddress = 0u;
 		} LoaderData;
 
-		// Popular loader data structure.
+		// Populate loader data structure.
 		LoaderData.m_ModuleBase = m_TargetBaseAddress;
 		LoaderData.m_LoadLibrary = CH_R_CAST<std::uintptr_t>(LoadLibraryA);
 		LoaderData.m_GetProcAddress = CH_R_CAST<std::uintptr_t>(GetProcAddress);
@@ -383,15 +378,9 @@ namespace chdr
 	{
 		std::vector<Process_t::ThreadInformation_t> m_EnumeratedThreads = {};
 
-		const HMODULE m_hNTDLL = GetModuleHandleA("ntdll.dll");
-		if (!m_hNTDLL)
-		{
-			CH_LOG("Couldn't find loaded module ntdll!");
-			return {};
-		}
-
 		HANDLE m_hSnapShot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, this->m_nTargetProcessID);
-		Thread_t::NtQueryInformationThread_fn NtQueryInformationThread = CH_R_CAST<Thread_t::NtQueryInformationThread_fn>(GetProcAddress(m_hNTDLL, "NtQueryInformationThread"));
+		Thread_t::NtQueryInformationThread_fn NtQueryInformationThread =
+			CH_R_CAST<Thread_t::NtQueryInformationThread_fn>(GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtQueryInformationThread"));
 
 		THREADENTRY32 mEntry = { 0 };
 		mEntry.dwSize = sizeof(mEntry);
@@ -426,8 +415,8 @@ namespace chdr
 			CloseHandle(m_hThreadHandle);
 
 			m_EnumeratedThreads.push_back(
-				{ mEntry.th32ThreadID, 
-				m_dThreadStartAddress, 
+				{ mEntry.th32ThreadID,
+				m_dThreadStartAddress,
 				m_bIsThreadSuspended }
 			);
 		}
@@ -512,10 +501,7 @@ namespace chdr
 	// Suspend every thread in a target process.
 	void Process_t::Suspend()
 	{
-		const HMODULE m_hNTDLL = GetModuleHandleA("ntdll.dll");
-		CH_ASSERT(true, m_hNTDLL, "Couldn't find loaded module ntdll!");
-
-		NtSuspendProcess_fn NtSuspendProcess = CH_R_CAST<NtSuspendProcess_fn>(GetProcAddress(m_hNTDLL, "NtSuspendProcess"));
+		NtSuspendProcess_fn NtSuspendProcess = CH_R_CAST<NtSuspendProcess_fn>(GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtSuspendProcess"));
 		this->m_bIsProcessManuallySuspended = NtSuspendProcess(this->m_hTargetProcessHandle) == 0x00000000/*STATUS_SUCCESS*/;
 
 		CH_ASSERT(false, this->m_bIsProcessManuallySuspended, "Failed to suspend process!");
@@ -527,10 +513,7 @@ namespace chdr
 		// TODO: Is there any use case of resuming a suspended process (that WE didn't suspend??).
 		CH_ASSERT(true, this->m_bIsProcessManuallySuspended, "Attempted to resume process that was never suspended!");
 
-		const HMODULE m_hNTDLL = GetModuleHandleA("ntdll.dll");
-		CH_ASSERT(true, m_hNTDLL, "Couldn't find loaded module ntdll!");
-
-		NtResumeProcess_fn NtResumeProcess = CH_R_CAST<NtResumeProcess_fn>(GetProcAddress(m_hNTDLL, "NtResumeProcess"));
+		NtResumeProcess_fn NtResumeProcess = CH_R_CAST<NtResumeProcess_fn>(GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtResumeProcess"));
 
 		this->m_bIsProcessManuallySuspended = NtResumeProcess(this->m_hTargetProcessHandle) != 0x00000000/*STATUS_SUCCESS*/;
 		CH_ASSERT(false, this->m_bIsProcessManuallySuspended == false, "Failed to resume suspended process!");
@@ -721,7 +704,7 @@ namespace chdr
 			if (m_DebugDirectoryData->Type == IMAGE_DEBUG_TYPE_CODEVIEW)
 			{
 				const CV_INFO_PDB70* m_PDBInfo = CH_R_CAST<CV_INFO_PDB70*>(m_ImageBuffer + this->RvaToOffset(m_DebugDirectoryData->AddressOfRawData));
-				
+
 				wchar_t m_GUIDStr[MAX_PATH];
 				if (StringFromGUID2(m_PDBInfo->Signature, m_GUIDStr, sizeof(m_GUIDStr)))
 				{
@@ -854,7 +837,7 @@ namespace chdr
 
 		for (std::size_t i = 0u; i < IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR/*Maximum*/; ++i)
 			this->m_DirectoryData.push_back(this->m_pNTHeaders->OptionalHeader.DataDirectory[i]);
-		
+
 		// Gather all needed directories, then ensure we're using the correct type for the image.
 		IMAGE_DATA_DIRECTORY m_ExportDataDirectory = this->GetDataDirectory(IMAGE_DIRECTORY_ENTRY_EXPORT);
 		IMAGE_DATA_DIRECTORY m_ImportDataDirectory = this->GetDataDirectory(IMAGE_DIRECTORY_ENTRY_IMPORT);
@@ -935,11 +918,11 @@ namespace chdr
 			// Read whole RVA block.
 			const auto m_FuncRVABlock = std::make_unique<std::uint32_t[]>(m_pExportDirectory.NumberOfFunctions * sizeof(std::uint32_t));
 			const std::size_t m_nReadRVA = m_Process.Read(m_BaseAddress + m_pExportDirectory.AddressOfFunctions, m_FuncRVABlock.get(), m_pExportDirectory.NumberOfFunctions * sizeof(std::uint32_t));
-		
+
 			// Read whole name block.
 			const auto m_NameRVABlock = std::make_unique<std::uint32_t[]>(m_pExportDirectory.NumberOfNames * sizeof(std::uint32_t));
 			const std::size_t m_nReadName = m_Process.Read(m_BaseAddress + m_pExportDirectory.AddressOfNames, m_NameRVABlock.get(), m_pExportDirectory.NumberOfNames * sizeof(std::uint32_t));
-		
+
 			// Read whole ordinal block.
 			const auto m_OrdinalBlock = std::make_unique<std::uint16_t[]>(m_pExportDirectory.NumberOfNames * sizeof(std::uint16_t));
 			const std::size_t m_nReadOrdinal = m_Process.Read(m_BaseAddress + m_pExportDirectory.AddressOfNameOrdinals, m_OrdinalBlock.get(), m_pExportDirectory.NumberOfNames * sizeof(std::uint16_t));
@@ -1007,7 +990,7 @@ namespace chdr
 					// Something went wrong while reading imp module, don't cache this.
 					continue;
 
-				std::size_t m_nThunkOffset = m_pImportDescriptor.OriginalFirstThunk ? 
+				std::size_t m_nThunkOffset = m_pImportDescriptor.OriginalFirstThunk ?
 					m_pImportDescriptor.OriginalFirstThunk : m_pImportDescriptor.FirstThunk;
 
 				for (std::size_t n = m_nThunkOffset; ; n += sizeof(IMAGE_THUNK_DATA32))
@@ -1033,7 +1016,7 @@ namespace chdr
 					this->m_ImportData.push_back({ m_szModuleName, m_szFunctionName });
 				}
 			}
-		} 
+		}
 	}
 
 	// Ensure we found the target PE header.
@@ -1124,8 +1107,8 @@ namespace chdr
 		// Traverse all sections to find which one our address resides in.
 		for (const auto& SectionData : this->GetSectionData())
 		{
-			if (m_nAddress < SectionData.m_Address ||							
-				m_nAddress > SectionData.m_Address + SectionData.m_Size) 
+			if (m_nAddress < SectionData.m_Address ||
+				m_nAddress > SectionData.m_Address + SectionData.m_Size)
 				continue;
 
 			return SectionData;
@@ -1136,12 +1119,11 @@ namespace chdr
 	// Get desired export address by name.
 	std::uintptr_t PEHeaderData_t::_GetProcAddress(const char* m_szExportName)
 	{
-		if (this->GetExportData().empty() || 
+		if (this->GetExportData().empty() ||
 			this->GetExportData().find(m_szExportName) != this->GetExportData().end())
 			// Ensure we even have this export in our map.		
 			return 0u;
 
-		// Export didn't exist in target PE.
 		return this->GetExportData()[m_szExportName].m_nAddress;
 	}
 }
@@ -1150,7 +1132,7 @@ namespace chdr
 namespace chdr
 {
 	// Used for parsing PE's from file.
-	ImageFile_t::ImageFile_t(const char *m_szImagePath, std::int32_t m_ParseType)
+	ImageFile_t::ImageFile_t(const char* m_szImagePath, std::int32_t m_ParseType)
 	{
 		CH_ASSERT(true, std::filesystem::exists(m_szImagePath), "File at %s doesn't exist, or wasn't accessible.", m_szImagePath);
 
@@ -1321,7 +1303,7 @@ namespace chdr
 namespace chdr
 {
 	// Initialize with TID.
-	Thread_t::Thread_t(DWORD m_dThreadID)
+	Thread_t::Thread_t(std::uint32_t m_dThreadID)
 	{
 		this->m_dThreadID = m_dThreadID;
 		this->m_hThreadHandle = OpenThread(THREAD_ALL_ACCESS, FALSE, this->m_dThreadID);
@@ -1384,19 +1366,23 @@ namespace chdr
 	}
 
 	// Check which module this thread is associated with.
-	std::string Thread_t::GetOwningModule(chdr::Process_t& m_Process, std::uintptr_t m_dStartAddress)
+	std::string Thread_t::GetOwningModule(chdr::Process_t& m_Process, bool m_bUseCachedData)
 	{
-		// Using cached data here, maybe this can be bad if all of a sudden a new module is loaded.
-		// But honestly, idc because it's so much faster than enumerating modules again..
-		for (auto& CurrentModule : m_Process.EnumerateModules(true))
+		const std::uintptr_t m_StartAddress = this->GetStartAddress();
+		if (m_StartAddress == 0u)
+			// Weird, shouldn't happen unless we have no valid HANDLE.
+			return "N/A (Couldn't find thread start address.)";
+
+		// Traverse through all loaded modules, and determine where our thread lies in.
+		for (auto& CurrentModule : m_Process.EnumerateModules(m_bUseCachedData))
 		{
-			if (m_dStartAddress < CurrentModule.m_BaseAddress ||
-				m_dStartAddress > CurrentModule.m_BaseAddress + CurrentModule.m_nSize)
+			if (m_StartAddress < CurrentModule.m_BaseAddress ||
+				m_StartAddress > CurrentModule.m_BaseAddress + CurrentModule.m_nSize)
 				continue;
 
 			return CurrentModule.m_szName;
 		}
-		return "N/A";
+		return "N/A (Passing through false as default parameter should be your solution.)";
 	}
 
 	// Ensure we found a HANDLE to the target thread.
@@ -1419,19 +1405,13 @@ namespace chdr
 	}
 
 	// Get's the start address of a target thread.
-	DWORD Thread_t::GetStartAddress()
+	std::uint32_t Thread_t::GetStartAddress()
 	{
-		const HMODULE m_hNTDLL = GetModuleHandleA("ntdll.dll");
-		if (!m_hNTDLL)
-		{
-			CH_LOG("Couldn't find loaded module ntdll!");
-			return NULL;
-		}
+		NtQueryInformationThread_fn NtQueryInformationThread =
+			CH_R_CAST<NtQueryInformationThread_fn>(GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtQueryInformationThread"));
 
-		NtQueryInformationThread_fn NtQueryInformationThread = CH_R_CAST<NtQueryInformationThread_fn>(GetProcAddress(m_hNTDLL, "NtQueryInformationThread"));
-
-		DWORD m_dThreadStartAddress = NULL;
-		NtQueryInformationThread(m_hThreadHandle, THREADINFOCLASS::ThreadQuerySetWin32StartAddress, &m_dThreadStartAddress, sizeof(DWORD), nullptr);
+		std::uint32_t m_dThreadStartAddress = NULL;
+		NtQueryInformationThread(this->m_hThreadHandle, THREADINFOCLASS::ThreadQuerySetWin32StartAddress, &m_dThreadStartAddress, sizeof(std::uint32_t), nullptr);
 		return m_dThreadStartAddress;
 	}
 }

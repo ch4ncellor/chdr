@@ -219,7 +219,7 @@ namespace chdr
 	class Module_t
 	{
 		std::uintptr_t m_dModuleBaseAddress = NULL;
-		DWORD m_dModuleSize = NULL;
+		std::uint32_t  m_dModuleSize = NULL;
 
 		PEHeaderData_t m_PEHeaderData = { };
 
@@ -252,7 +252,7 @@ namespace chdr
 	class Thread_t
 	{
 		// Basic thread information.
-		DWORD m_dThreadID = 0;
+		std::uint32_t m_dThreadID = 0;
 		HANDLE m_hThreadHandle = { };
 
 		// Acts as a lock, to only resume threads previously suspended.
@@ -289,7 +289,7 @@ namespace chdr
 		Thread_t() { }
 
 		// Initialize with TID.
-		Thread_t(DWORD m_dThreadID);
+		Thread_t(std::uint32_t m_dThreadID);
 
 		// Initialize with TID&HANDLE.
 		Thread_t(HANDLE m_hThreadHandle);
@@ -307,7 +307,7 @@ namespace chdr
 		void Resume();
 
 		// Check which module this thread is associated with.
-		std::string GetOwningModule(chdr::Process_t& m_Process, std::uintptr_t m_dStartAddress);
+		std::string GetOwningModule(chdr::Process_t& m_Process, bool m_bUseCachedData = true);
 
 		// Ensure we found a HANDLE to the target thread.
 		bool IsValid();
@@ -319,7 +319,7 @@ namespace chdr
 		bool IsManuallySuspended();
 
 		// Get's the start address of a target thread.
-		DWORD GetStartAddress();
+		std::uint32_t GetStartAddress();
 	};
 
 	// Process utility helpers
@@ -333,7 +333,7 @@ namespace chdr
 		Process_t(const wchar_t* m_wszProcessName, std::int32_t m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL, DWORD m_dDesiredAccess = PROCESS_ALL_ACCESS);
 
 		// Get target proces by PID.
-		Process_t(DWORD m_nProcessID, std::int32_t m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL, DWORD m_dDesiredAccess = PROCESS_ALL_ACCESS);
+		Process_t(std::uint32_t m_nProcessID, std::int32_t m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL, DWORD m_dDesiredAccess = PROCESS_ALL_ACCESS);
 
 		// Get target proces by HANDLE.
 		Process_t(HANDLE m_hProcessHandle, std::int32_t m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL);
@@ -364,7 +364,7 @@ namespace chdr
 
 		// Basic process information.
 		HANDLE m_hTargetProcessHandle = { 0 };
-		DWORD  m_nTargetProcessID = 0;
+		std::uint32_t  m_nTargetProcessID = 0;
 
 		// For saving off this processes' architecture type.
 		eProcessArchitecture m_eProcessArchitecture = eProcessArchitecture::ARCHITECTURE_UNKNOWN;
@@ -493,9 +493,9 @@ namespace chdr
 		// Relevant information pertaining a target thread.
 		struct ThreadInformation_t
 		{
-			DWORD		m_dThreadID = 0;
-			DWORD		m_dThreadStartAddress = 0;
-			bool		m_bIsThreadSuspended = false;
+			std::uint32_t		m_dThreadID = 0;
+			std::uint32_t		m_dThreadStartAddress = 0;
+			bool		        m_bIsThreadSuspended = false;
 		};
 
 		// Relevant information pertaining a target module.
@@ -541,7 +541,7 @@ namespace chdr
 		std::uintptr_t GetBaseAddress();
 
 		// The process ID of the target process. (lol)
-		DWORD GetProcessID();
+		std::uint32_t GetProcessID();
 
 		// The PEB of the target process.
 		PEB GetPEB();
