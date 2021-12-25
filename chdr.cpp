@@ -257,21 +257,45 @@ namespace chdr
 		}
 
 		// Address our module will be in context of target process.
-		const std::uintptr_t m_TargetBaseAddress = CH_R_CAST<std::uintptr_t>(this->Allocate(m_pNTHeaders->OptionalHeader.SizeOfImage/*0x1000*/, PAGE_EXECUTE_READWRITE));
+		const std::uintptr_t m_TargetBaseAddress = this->Allocate(m_pNTHeaders->OptionalHeader.SizeOfImage/*0x1000*/, PAGE_EXECUTE_READWRITE);
 
 		// Copy over PE Header to target process.
-		this->Write(CH_R_CAST<LPVOID>(m_TargetBaseAddress), m_ImageBuffer, m_pNTHeaders->OptionalHeader.SizeOfImage/*0x1000*/);
-
+		if (!this->Write(m_TargetBaseAddress, m_ImageBuffer, m_pNTHeaders->OptionalHeader.SizeOfImage/*0x1000*/));
+		{
+			CH_LOG("Couldn't copy over PE header data to target process.");
+			return false;
+		}
 		// Copy over needed sections to target process.
 		PIMAGE_SECTION_HEADER m_pSectionHeaders = IMAGE_FIRST_SECTION(m_pNTHeaders);
 		for (std::size_t i = 0u; i != m_pNTHeaders->FileHeader.NumberOfSections; ++i, ++m_pSectionHeaders)
 		{
-			if (!this->Write(CH_R_CAST<LPVOID>(m_TargetBaseAddress + m_pSectionHeaders->VirtualAddress),
-				m_ImageBuffer + m_pSectionHeaders->PointerToRawData, m_pSectionHeaders->SizeOfRawData))
+			const std::uintptr_t m_Address = m_TargetBaseAddress + m_pSectionHeaders->VirtualAddress;
+			const std::uint8_t m_WrittenData = m_ImageBuffer[m_pSectionHeaders->PointerToRawData];
+
+			if (!this->Write(m_Address, m_WrittenData, m_pSectionHeaders->SizeOfRawData))
 			{
-				CH_LOG("Couldn't copy over section %s to target process.", CH_R_CAST<char*>(m_pSectionHeaders->Name));
+				CH_LOG("Couldn't copy over section %s's data to target process.", CH_R_CAST<char*>(m_pSectionHeaders->Name));
 				return false;
 			}
+		}
+
+		// Data to pass through our shellcode.
+		struct LoaderData_t { 
+			std::uintptr_t m_ModuleBase = 0u, m_LoadLibrary = 0u, m_GetProcAddress = 0u; 
+		} LoaderData;
+
+		// Popular loader data structure.
+		LoaderData.m_ModuleBase = m_TargetBaseAddress;
+		LoaderData.m_LoadLibrary = CH_R_CAST<std::uintptr_t>(LoadLibraryA);
+		LoaderData.m_GetProcAddress = CH_R_CAST<std::uintptr_t>(GetProcAddress);
+
+		// Address our loader data will be in context of target process.
+		const std::uintptr_t m_LoaderDataAddress = this->Allocate(sizeof(LoaderData_t), PAGE_EXECUTE_READWRITE);
+
+		if (!this->Write(m_LoaderDataAddress, &LoaderData, sizeof(LoaderData_t)))
+		{
+			CH_LOG("Couldn't copy over loader data to target process.");
+			return false;
 		}
 
 		// TODO:
@@ -328,7 +352,7 @@ namespace chdr
 	bool Process_t::LoadLibraryInject(const char* m_szDLLPath)
 	{
 		// Allocate memory in target process.
-		LPVOID m_AllocatedMemory = this->Allocate(strlen(m_szDLLPath), PAGE_READWRITE);
+		const std::uintptr_t m_AllocatedMemory = this->Allocate(strlen(m_szDLLPath), PAGE_READWRITE);
 		if (!m_AllocatedMemory)
 		{
 			CH_LOG("Couldn't allocate memory to target process. Error code was #%i", GetLastError());
@@ -344,7 +368,7 @@ namespace chdr
 		}
 
 		// Load DLL by invoking LoadLibrary(m_szDLLPath) in a target process
-		const HANDLE m_hRemoteThread = this->_CreateRemoteThread(CH_R_CAST<LPVOID>(LoadLibraryA), m_AllocatedMemory);
+		const HANDLE m_hRemoteThread = this->_CreateRemoteThread(CH_R_CAST<LPVOID>(LoadLibraryA), CH_R_CAST<LPVOID>(m_AllocatedMemory));
 		if (!m_hRemoteThread || m_hRemoteThread == INVALID_HANDLE_VALUE)
 		{
 			CH_LOG("Couldn't create remote thread to target process. Error code was #%i", GetLastError());
@@ -540,10 +564,10 @@ namespace chdr
 
 	// WriteProcessMemory implementation.
 	template<typename S>
-	std::size_t Process_t::Write(LPVOID m_WriteAddress, const S& m_WriteValue)
+	std::size_t Process_t::Write(std::uintptr_t m_WriteAddress, const S& m_WriteValue)
 	{
 		SIZE_T lpNumberOfBytesWritten = NULL; // Fuck you MSVC.
-		if (!WriteProcessMemory(this->m_hTargetProcessHandle, m_WriteAddress, m_WriteValue, sizeof(S), &lpNumberOfBytesWritten))
+		if (!WriteProcessMemory(this->m_hTargetProcessHandle, (LPVOID)m_WriteAddress, (LPCVOID)m_WriteValue, sizeof(S), &lpNumberOfBytesWritten))
 		{
 			CH_LOG("Failed to write memory at addr 0x%X, with error code #%d.", m_WriteAddress, GetLastError());
 		}
@@ -553,10 +577,10 @@ namespace chdr
 
 	// WriteProcessMemory implementation.
 	template<typename S>
-	std::size_t Process_t::Write(LPVOID m_WriteAddress, const S& m_WriteValue, std::size_t m_WriteSize)
+	std::size_t Process_t::Write(std::uintptr_t m_WriteAddress, const S& m_WriteValue, std::size_t m_WriteSize)
 	{
 		SIZE_T lpNumberOfBytesWritten = NULL; // Fuck you MSVC.
-		if (!WriteProcessMemory(this->m_hTargetProcessHandle, m_WriteAddress, m_WriteValue, m_WriteSize, &lpNumberOfBytesWritten))
+		if (!WriteProcessMemory(this->m_hTargetProcessHandle, (LPVOID)m_WriteAddress, (LPCVOID)m_WriteValue, m_WriteSize, &lpNumberOfBytesWritten))
 		{
 			CH_LOG("Failed to write memory at addr 0x%X, with error code #%d.", m_WriteAddress, GetLastError());
 		}
@@ -565,7 +589,7 @@ namespace chdr
 	}
 
 	// VirtualAllocEx implementation.
-	LPVOID Process_t::Allocate(std::size_t m_AllocationSize, DWORD m_dProtectionType)
+	std::uintptr_t Process_t::Allocate(std::size_t m_AllocationSize, DWORD m_dProtectionType)
 	{
 		const LPVOID m_AllocatedMemory = VirtualAllocEx(this->m_hTargetProcessHandle, nullptr, m_AllocationSize, MEM_COMMIT | MEM_RESERVE, m_dProtectionType);
 		if (!m_AllocatedMemory)
@@ -573,7 +597,7 @@ namespace chdr
 			CH_LOG("Failed to allocate memory with error code #%i.", GetLastError());
 		}
 
-		return m_AllocatedMemory;
+		return CH_R_CAST<std::uintptr_t>(m_AllocatedMemory);
 	}
 
 	// VirtualFreeEx implementation.
@@ -657,6 +681,13 @@ namespace chdr
 			m_ExportDataDirectory = m_NT32Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
 			m_ImportDataDirectory = m_NT32Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
 			m_DebugDataDirectory = m_NT32Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG];
+
+			if (!this->m_DirectoryData.empty())
+				// Reset directory data to be filled with one of correct architecture.
+				this->m_DirectoryData.clear();
+
+			for (std::size_t i = 0u; i < IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR/*Maximum*/; ++i)
+				this->m_DirectoryData.push_back(m_NT32Temporary->OptionalHeader.DataDirectory[i]);
 #endif
 		}
 		else if (this->m_pNTHeaders->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
@@ -666,6 +697,13 @@ namespace chdr
 			m_ExportDataDirectory = m_NT64Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
 			m_ImportDataDirectory = m_NT64Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
 			m_DebugDataDirectory = m_NT64Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG];
+
+			if (!this->m_DirectoryData.empty())
+				// Reset directory data to be filled with one of correct architecture.
+				this->m_DirectoryData.clear();
+
+			for (std::size_t i = 0u; i < IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR/*Maximum*/; ++i)
+				this->m_DirectoryData.push_back(m_NT64Temporary->OptionalHeader.DataDirectory[i]);
 #endif
 		}
 
@@ -734,7 +772,7 @@ namespace chdr
 					continue;
 
 				char* m_szExportName = CH_R_CAST<char*>(m_ImageBuffer + this->RvaToOffset(m_CurrentName));
-				this->m_ExportData.push_back({ m_szExportName, m_pFunctionAddress[m_CurrentOrdinal], m_CurrentOrdinal });
+				this->m_ExportData[m_szExportName] = { m_pFunctionAddress[m_CurrentOrdinal], m_CurrentOrdinal };
 			}
 		}
 
@@ -892,7 +930,7 @@ namespace chdr
 		}
 		else // Export table parsing.
 		{
-			IMAGE_EXPORT_DIRECTORY m_pExportDirectory = m_Process.Read<IMAGE_EXPORT_DIRECTORY>(m_BaseAddress + m_ExportDataDirectory.VirtualAddress);
+			IMAGE_EXPORT_DIRECTORY m_pExportDirectory = m_Process.Read<IMAGE_EXPORT_DIRECTORY>(m_BaseAddress + (uintptr_t)m_ExportDataDirectory.VirtualAddress);
 
 			// Read whole RVA block.
 			const auto m_FuncRVABlock = std::make_unique<std::uint32_t[]>(m_pExportDirectory.NumberOfFunctions * sizeof(std::uint32_t));
@@ -937,7 +975,7 @@ namespace chdr
 				printf("sh: %s %i %X\n", m_szExportName, m_CurrentOrdinal, m_pFuncBlock[m_CurrentOrdinal]);
 
 				// Cache desired data.
-				this->m_ExportData.push_back({ m_szExportName, m_pFuncBlock[m_CurrentOrdinal], m_CurrentOrdinal });
+				this->m_ExportData[m_szExportName] = { m_pFuncBlock[m_CurrentOrdinal], m_CurrentOrdinal };
 			}
 		}
 
@@ -1039,7 +1077,7 @@ namespace chdr
 	}
 
 	// Helper function to get exported functions' data of PE image.
-	std::vector<PEHeaderData_t::ExportData_t> PEHeaderData_t::GetExportData()
+	std::map<std::string, PEHeaderData_t::ExportData_t> PEHeaderData_t::GetExportData()
 	{
 		return this->m_ExportData;
 	}
@@ -1095,6 +1133,18 @@ namespace chdr
 			return SectionData;
 		}
 		return {}; // Wtf. Couldn't find.
+	}
+
+	// Get desired export address by name.
+	std::uintptr_t PEHeaderData_t::_GetProcAddress(const char* m_szExportName)
+	{
+		if (this->GetExportData().empty() || 
+			this->GetExportData().find(m_szExportName) != this->GetExportData().end())
+			// Ensure we even have this export in our map.		
+			return 0u;
+
+		// Export didn't exist in target PE.
+		return this->GetExportData()[m_szExportName].m_nAddress;
 	}
 }
 

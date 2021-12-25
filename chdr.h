@@ -6,6 +6,7 @@
 #include <TlHelp32.h>
 #include <fstream>
 #include <comdef.h>
+#include <map>
 #include <Psapi.h>
 #include <filesystem>
 #include <winternl.h>
@@ -58,7 +59,6 @@ namespace chdr
 
 		struct ExportData_t
 		{
-			std::string     m_szName = "";
 			std::uint32_t   m_nAddress = 0u;
 			std::uint16_t	m_nOrdinal = 0u;
 		};
@@ -86,11 +86,11 @@ namespace chdr
 		};
 
 		// For caching desired data.
-		std::vector<SectionData_t> m_SectionData = { };
-		std::vector<ExportData_t> m_ExportData = { };
-		std::vector<ImportData_t> m_ImportData = { };
-		std::vector<IMAGE_DATA_DIRECTORY> m_DirectoryData = { };
-		DebugData_t				  m_DebugData  = { };
+		std::vector<SectionData_t>          m_SectionData = { };
+		std::map<std::string, ExportData_t> m_ExportData = { };
+		std::vector<ImportData_t>           m_ImportData = { };
+		std::vector<IMAGE_DATA_DIRECTORY>   m_DirectoryData = { };
+		DebugData_t				            m_DebugData  = { };
 
 		PIMAGE_DOS_HEADER        m_pDOSHeaders = { 0 };
 		PIMAGE_NT_HEADERS        m_pNTHeaders = { 0 };
@@ -134,7 +134,7 @@ namespace chdr
 		std::vector<SectionData_t> GetSectionData();
 
 		// Helper function to get exported functions' data of PE image.
-		std::vector<ExportData_t> GetExportData();
+		std::map<std::string, ExportData_t> GetExportData();
 
 		// Helper function to get imported functions' data of PE image.
 		std::vector<ImportData_t> GetImportData();
@@ -150,6 +150,9 @@ namespace chdr
 
 		// Get certain section by address in memory.
 		SectionData_t GetSectionByAddress(std::uint32_t m_nAddress);
+
+		// Get desired export address by name.
+		std::uintptr_t _GetProcAddress(const char* m_szExportName);
 	};
 
 	// PE Image utility helpers
@@ -595,14 +598,14 @@ namespace chdr
 
 		// WriteProcessMemory implementation.
 		template<typename S>
-		std::size_t Write(LPVOID m_WriteAddress, const S& m_WriteValue);
+		std::size_t Write(std::uintptr_t m_WriteAddress, const S& m_WriteValue);
 
 		// WriteProcessMemory implementation.
 		template<typename S>
-		std::size_t Write(LPVOID m_WriteAddress, const S& m_WriteValue, std::size_t m_WriteSize);
+		std::size_t Write(std::uintptr_t m_WriteAddress, const S& m_WriteValue, std::size_t m_WriteSize);
 
 		// VirtualAllocEx implementation.
-		LPVOID Allocate(std::size_t m_AllocationSize, DWORD m_dProtectionType);
+		std::uintptr_t Allocate(std::size_t m_AllocationSize, DWORD m_dProtectionType);
 
 		// VirtualFreeEx implementation.
 		BOOL Free(LPVOID m_FreeAddress);
