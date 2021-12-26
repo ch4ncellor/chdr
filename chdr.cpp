@@ -410,7 +410,7 @@ namespace chdr
 		{
 			// Address our loader data will be in context of target process.
 			const std::uintptr_t m_ShellcodeAddress = this->Allocate(4096, PAGE_EXECUTE_READWRITE);
-			if (!WriteProcessMemory(this->m_hTargetProcessHandle, (LPVOID)m_ShellcodeAddress, Shellcode, 4096, nullptr))
+			if (!this->Write(m_ShellcodeAddress, Shellcode, 4096))
 			{
 				CH_LOG("Couldn't copy over loader shellcode to target process.");
 				return false;
