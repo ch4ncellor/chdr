@@ -349,8 +349,6 @@ namespace chdr
 		for (std::size_t i = 0u; i != m_pNTHeaders->FileHeader.NumberOfSections; ++i, ++m_pSectionHeaders)
 		{
 			const std::uintptr_t m_Address = m_TargetBaseAddress + m_pSectionHeaders->VirtualAddress;
-			const std::uint8_t m_WrittenData = m_ImageBuffer[m_pSectionHeaders->PointerToRawData];
-
 			if (!this->Write(m_Address, &m_ImageBuffer[m_pSectionHeaders->PointerToRawData], m_pSectionHeaders->SizeOfRawData))
 			{
 				CH_LOG("Couldn't copy over section %s's data to target process.", CH_R_CAST<char*>(m_pSectionHeaders->Name));
@@ -359,14 +357,16 @@ namespace chdr
 		}
 
 		// Populate loader data structure.
-		LoaderData.m_ModuleBase = m_TargetBaseAddress;
-		LoaderData.m_ImageBase = CH_S_CAST<std::uintptr_t>(m_pNTHeaders->OptionalHeader.ImageBase);
-		LoaderData.m_EntryPoint = CH_S_CAST<std::uintptr_t>(m_pNTHeaders->OptionalHeader.AddressOfEntryPoint);
-		LoaderData.m_LoadLibrary = CH_R_CAST<std::uintptr_t>(LoadLibraryA);
-		LoaderData.m_GetProcAddress = CH_R_CAST<std::uintptr_t>(GetProcAddress);
-		LoaderData.m_RelocDirVA = CH_S_CAST<std::uint32_t>(m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress);
-		LoaderData.m_RelocDirSize = CH_S_CAST<std::uint32_t>(m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size);
-		LoaderData.m_ImportDirVA = CH_S_CAST<std::uint32_t>(m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+		LoaderData = {
+			m_TargetBaseAddress,
+			CH_S_CAST<std::uintptr_t>(m_pNTHeaders->OptionalHeader.ImageBase),
+			CH_S_CAST<std::uintptr_t>(m_pNTHeaders->OptionalHeader.AddressOfEntryPoint),
+			CH_R_CAST<std::uintptr_t>(LoadLibraryA),
+			CH_R_CAST<std::uintptr_t>(GetProcAddress),
+			CH_S_CAST<std::uint32_t>(m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress),
+			CH_S_CAST<std::uint32_t>(m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size),
+			CH_S_CAST<std::uint32_t>(m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress)
+		};
 
 		// Fix up data if we've built with mismatched architecture.
 		if (m_pNTHeaders->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC)
