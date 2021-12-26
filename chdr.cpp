@@ -106,7 +106,10 @@ namespace chdr
 	std::string Process_t::GetProcessName_Internal()
 	{
 		TCHAR m_szProcessNameBuffer[MAX_PATH];
-		GetModuleBaseName(this->m_hTargetProcessHandle, NULL, m_szProcessNameBuffer, MAX_PATH);
+		if (!GetModuleBaseName(this->m_hTargetProcessHandle, NULL, m_szProcessNameBuffer, MAX_PATH))
+			return "";
+
+		m_szProcessNameBuffer[MAX_PATH - 1] = '\0';
 
 		// TCHAR->string
 		_bstr_t m_szPreProcessName(m_szProcessNameBuffer);
@@ -136,7 +139,10 @@ namespace chdr
 	std::string Process_t::GetProcessPath_Internal()
 	{
 		TCHAR m_szProcessPathBuffer[MAX_PATH];
-		GetModuleFileNameEx(this->m_hTargetProcessHandle, NULL, m_szProcessPathBuffer, MAX_PATH);
+		if (!GetModuleFileNameEx(this->m_hTargetProcessHandle, NULL, m_szProcessPathBuffer, MAX_PATH))
+			return "";
+
+		m_szProcessPathBuffer[MAX_PATH - 1] = '\0';
 
 		// TCHAR->string
 		_bstr_t m_szPreProcessPath(m_szProcessPathBuffer);
@@ -203,12 +209,7 @@ namespace chdr
 	{
 		BOOL m_bHasRemoteDebugger = FALSE;
 		CheckRemoteDebuggerPresent(this->m_hTargetProcessHandle, &m_bHasRemoteDebugger);
-
-		if (m_bHasRemoteDebugger)
-			return true;
-
-		const PEB m_PEB = this->GetPEB();
-		return m_PEB.BeingDebugged;
+		return m_bHasRemoteDebugger;
 	}
 
 	// The PEB of the target process.
@@ -232,10 +233,15 @@ namespace chdr
 		return m_PEB;
 	}
 
+	struct CustomPassthrough_t {
+		char szKey[256];
+	};
+
 	// Data to pass through our shellcode.
 	struct LoaderData_t {
 		std::uintptr_t m_ModuleBase = 0u, m_ImageBase = 0u, m_EntryPoint = 0u, m_LoadLibrary = 0u, m_GetProcAddress = 0u;
 		std::uint32_t  m_RelocDirVA = 0u, m_RelocDirSize = 0u, m_ImportDirVA = 0u;
+		CustomPassthrough_t m_CustomPassthrough = {};
 	} LoaderData;
 
 	// Code to fix up needed data, then execute DllMain in target process.
@@ -281,7 +287,7 @@ namespace chdr
 		if (!m_LoaderData->m_ImportDirVA)
 		{
 			// Call EP of our module.
-			DllMain(m_TargetBase, DLL_PROCESS_ATTACH, nullptr/*Maybe allow user to pass custom struct?*/);
+			DllMain(m_TargetBase, DLL_PROCESS_ATTACH, (void*)&m_LoaderData->m_CustomPassthrough/*nullptr*//*Maybe allow user to pass custom struct?*/);
 			return;
 		}
 
@@ -313,7 +319,7 @@ namespace chdr
 		}
 		
 		// Call EP of our module.
-		DllMain(m_TargetBase, DLL_PROCESS_ATTACH, nullptr/*Maybe allow user to pass custom struct?*/);
+		DllMain(m_TargetBase, DLL_PROCESS_ATTACH, (void*)&m_LoaderData->m_CustomPassthrough/*nullptr*//*Maybe allow user to pass custom struct?*/);
 	};
 
 	// Internal manual map function.
@@ -356,6 +362,11 @@ namespace chdr
 			}
 		}
 
+		// Can use this to communicate some data to the target process.
+		// lpReserved parameter in DllMain is unused, so popping our custom struct here is all good.
+		CustomPassthrough_t m_CustomTransmittedData = {};
+		strcpy_s<256>(m_CustomTransmittedData.szKey, "Hello from the other side!");
+
 		// Populate loader data structure.
 		LoaderData = {
 			m_TargetBaseAddress,
@@ -365,7 +376,8 @@ namespace chdr
 			CH_R_CAST<std::uintptr_t>(GetProcAddress),
 			CH_S_CAST<std::uint32_t>(m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress),
 			CH_S_CAST<std::uint32_t>(m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size),
-			CH_S_CAST<std::uint32_t>(m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress)
+			CH_S_CAST<std::uint32_t>(m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress),
+			m_CustomTransmittedData
 		};
 
 		// Fix up data if we've built with mismatched architecture.
@@ -494,7 +506,12 @@ namespace chdr
 		}
 
 		// Load DLL by invoking LoadLibrary(m_szDLLPath) in a target process
-		this->_CreateRemoteThread(CH_R_CAST<LPVOID>(LoadLibraryA), CH_R_CAST<LPVOID>(m_AllocatedMemory));
+		const std::int32_t m_nThreadResult = this->_CreateRemoteThread(CH_R_CAST<LPVOID>(LoadLibraryA), CH_R_CAST<LPVOID>(m_AllocatedMemory));
+		if (m_nThreadResult <= 0)
+		{
+			CH_LOG("Failed to create remote thread in target process with code %i.", m_nThreadResult);
+			return false;
+		}
 
 		return true;
 	}
@@ -576,6 +593,8 @@ namespace chdr
 			wchar_t m_wszModPath[MAX_PATH];
 			if (!GetModuleFileNameEx(this->m_hTargetProcessHandle, mEntry.hModule, m_wszModPath, sizeof(m_wszModPath) / sizeof(wchar_t)))
 				continue;
+
+			m_wszModPath[MAX_PATH - 1] = '\0';
 
 			// Convert wstring->string.
 			_bstr_t m_bszPreModulePath(m_wszModPath);
@@ -1074,11 +1093,12 @@ namespace chdr
 				// Read export name.
 				char m_szExportName[MAX_PATH];
 				const std::size_t m_ReadNameBytes = m_Process.Read(m_BaseAddress + m_CurrentName, m_szExportName, sizeof(m_szExportName));
-				m_szExportName[MAX_PATH - 1] = '\0';
 
 				if (m_ReadNameBytes == 0u)
 					// Something went wrong while reading exp name, don't cache this.
 					continue;
+
+				m_szExportName[MAX_PATH - 1] = '\0';
 
 				// Cache desired data.
 				this->m_ExportData[m_szExportName] = { m_pFuncBlock[m_CurrentOrdinal], m_CurrentOrdinal };
@@ -1109,11 +1129,12 @@ namespace chdr
 				// Read module name.
 				char m_szModuleName[MAX_PATH];
 				const std::size_t m_nReadModuleName = m_Process.Read(m_BaseAddress + m_pImportDescriptor.Name, m_szModuleName, sizeof(m_szModuleName));
-				m_szModuleName[MAX_PATH - 1] = '\0';
 
 				if (m_nReadModuleName == 0u)
 					// Something went wrong while reading imp module, don't cache this.
 					continue;
+
+				m_szModuleName[MAX_PATH - 1] = '\0';
 
 				std::size_t m_nThunkOffset = m_pImportDescriptor.OriginalFirstThunk ?
 					m_pImportDescriptor.OriginalFirstThunk : m_pImportDescriptor.FirstThunk;
@@ -1131,11 +1152,12 @@ namespace chdr
 					// Read function name.
 					char m_szFunctionName[MAX_PATH];
 					const std::size_t m_ReadNameBytes = m_Process.Read(m_BaseAddress + std::uintptr_t(m_pThunkData.u1.AddressOfData) + 2, m_szFunctionName, sizeof(m_szFunctionName));
-					m_szFunctionName[MAX_PATH - 1] = '\0';
-
+			
 					if (m_ReadNameBytes == 0u)
 						// Something went wrong while reading imp name, don't cache this.
 						continue;
+
+					m_szFunctionName[MAX_PATH - 1] = '\0';
 
 					// Cache desired data.
 					this->m_ImportData.push_back({ m_szModuleName, m_szFunctionName });
@@ -1245,7 +1267,7 @@ namespace chdr
 	std::uintptr_t PEHeaderData_t::GetRemoteProcAddress(const char* m_szExportName)
 	{
 		if (this->GetExportData().empty() ||
-			this->GetExportData().find(m_szExportName) != this->GetExportData().end())
+			this->GetExportData().find(m_szExportName) == this->GetExportData().end())
 			// Ensure we even have this export in our map.		
 			return 0u;
 
