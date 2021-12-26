@@ -14,7 +14,7 @@
 namespace chdr
 {
 
-#if 0
+#if 1
 #define SHOULD_PRINT_DEBUG_LOGS // Log errors/verbose information.
 #endif
 
@@ -90,7 +90,7 @@ namespace chdr
 		std::map<std::string, ExportData_t> m_ExportData = { };
 		std::vector<ImportData_t>           m_ImportData = { };
 		std::vector<IMAGE_DATA_DIRECTORY>   m_DirectoryData = { };
-		DebugData_t				            m_DebugData  = { };
+		DebugData_t				            m_DebugData = { };
 
 		PIMAGE_DOS_HEADER        m_pDOSHeaders = { 0 };
 		PIMAGE_NT_HEADERS        m_pNTHeaders = { 0 };
@@ -100,12 +100,12 @@ namespace chdr
 	public:
 		enum PEHEADER_PARSING_TYPE : std::int32_t
 		{
-			TYPE_NONE             = (0 << 0),
-			TYPE_ALL              = (1 << 1),
+			TYPE_NONE = (0 << 0),
+			TYPE_ALL = (1 << 1),
 			TYPE_EXPORT_DIRECTORY = (1 << 2),
 			TYPE_IMPORT_DIRECTORY = (1 << 3),
-			TYPE_DEBUG_DIRECTORY  = (1 << 4),
-			TYPE_SECTIONS         = (1 << 5)
+			TYPE_DEBUG_DIRECTORY = (1 << 4),
+			TYPE_SECTIONS = (1 << 5)
 		};
 	public:
 		// Default ctor
@@ -141,7 +141,7 @@ namespace chdr
 
 		// Helper function to get debug directories' data of PE image.
 		DebugData_t GetDebugData();
-		
+
 		// Convert relative virtual address to file offset.
 		std::uint32_t RvaToOffset(std::uint32_t m_dRva);
 
@@ -152,7 +152,7 @@ namespace chdr
 		SectionData_t GetSectionByAddress(std::uint32_t m_nAddress);
 
 		// Get desired export address by name.
-		std::uintptr_t _GetProcAddress(const char* m_szExportName);
+		std::uintptr_t GetRemoteProcAddress(const char* m_szExportName);
 	};
 
 	// PE Image utility helpers
@@ -162,7 +162,7 @@ namespace chdr
 	public:
 
 		// Used for parsing PE's from file.
-		ImageFile_t(const char *m_szImagePath, std::int32_t m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL);
+		ImageFile_t(const char* m_szImagePath, std::int32_t m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL);
 
 		// Used for parsing PE's from memory.
 		ImageFile_t(std::uint8_t* m_ImageBuffer, std::size_t m_nImageSize, std::int32_t m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL);
@@ -233,7 +233,7 @@ namespace chdr
 		Module_t(chdr::Process_t& m_Process, const char* m_szModuleName, std::int32_t m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL);
 
 		// Setup module in process by address in process. (plz pass correct data here :D)
-		Module_t(chdr::Process_t& m_Process, std::uintptr_t m_dModuleBaseAddress, DWORD m_dModuleSize, std::int32_t m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL);
+		Module_t(chdr::Process_t& m_Process, std::uintptr_t m_dModuleBaseAddress, std::uint32_t m_dModuleSize, std::int32_t m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL);
 
 		// Ease of use for building constructors.
 		void SetupModule_Internal(chdr::Process_t& m_Process, std::int32_t m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL);
@@ -341,7 +341,7 @@ namespace chdr
 		// Default dtor
 		~Process_t();
 
-		enum class eManualMapInjectionFlags : std::int32_t
+		enum eManualMapInjectionFlags : std::int32_t
 		{
 			INJECTION_NONE = (0 << 0),
 			INJECTION_MODE_THREADHIJACK = (1 << 1),
@@ -598,11 +598,11 @@ namespace chdr
 
 		// WriteProcessMemory implementation.
 		template<typename S>
-		std::size_t Write(std::uintptr_t m_WriteAddress, const S& m_WriteValue);
+		std::size_t Write(std::uintptr_t m_WriteAddress,  S m_WriteValue);
 
 		// WriteProcessMemory implementation.
 		template<typename S>
-		std::size_t Write(std::uintptr_t m_WriteAddress, const S& m_WriteValue, std::size_t m_WriteSize);
+		std::size_t Write(std::uintptr_t m_WriteAddress,  S m_WriteValue, std::size_t m_WriteSize);
 
 		// VirtualAllocEx implementation.
 		std::uintptr_t Allocate(std::size_t m_AllocationSize, DWORD m_dProtectionType);
@@ -614,7 +614,7 @@ namespace chdr
 		std::size_t Query(LPCVOID m_QueryAddress, MEMORY_BASIC_INFORMATION* m_MemoryInformation);
 
 		// _CreateRemoteThread implementation.
-		HANDLE _CreateRemoteThread(LPVOID m_lpStartAddress, LPVOID m_lpParameter);
+		std::int32_t _CreateRemoteThread(LPVOID m_lpStartAddress, LPVOID m_lpParameter);
 	};
 
 

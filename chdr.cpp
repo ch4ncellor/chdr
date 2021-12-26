@@ -232,6 +232,90 @@ namespace chdr
 		return m_PEB;
 	}
 
+	// Data to pass through our shellcode.
+	struct LoaderData_t {
+		std::uintptr_t m_ModuleBase = 0u, m_ImageBase = 0u, m_EntryPoint = 0u, m_LoadLibrary = 0u, m_GetProcAddress = 0u;
+		std::uint32_t  m_RelocDirVA = 0u, m_RelocDirSize = 0u, m_ImportDirVA = 0u;
+	} LoaderData;
+
+	// Code to fix up needed data, then execute DllMain in target process.
+	void __stdcall Shellcode(LoaderData_t* m_LoaderData)
+	{
+		const std::uintptr_t m_TargetBase = m_LoaderData->m_ModuleBase;
+		const std::uintptr_t m_ImageBase = m_LoaderData->m_ImageBase;
+
+		// Calculate delta to relocate.
+		const std::uintptr_t m_Delta = m_TargetBase - m_ImageBase;
+
+		if (m_Delta && m_LoaderData->m_RelocDirVA)
+			// Relocate image.
+		{
+			PIMAGE_BASE_RELOCATION m_pRelocation = CH_R_CAST<PIMAGE_BASE_RELOCATION>(m_TargetBase + m_LoaderData->m_RelocDirVA);
+			PIMAGE_BASE_RELOCATION m_pRelocationEnd = CH_R_CAST<PIMAGE_BASE_RELOCATION>(CH_R_CAST<std::uintptr_t>(m_pRelocation) + m_LoaderData->m_RelocDirSize - sizeof(IMAGE_BASE_RELOCATION)/*?*/);
+			
+			for (; m_pRelocation < m_pRelocationEnd;
+				m_pRelocation = CH_R_CAST<PIMAGE_BASE_RELOCATION>(CH_R_CAST<std::uintptr_t>(m_pRelocation) + m_pRelocation->SizeOfBlock))
+			{
+				std::uint16_t* m_pRelocationType = CH_R_CAST<std::uint16_t*>(m_pRelocation + 0x1);
+
+				const std::size_t m_nRelocationAmount = CH_S_CAST<std::size_t>((m_pRelocation->SizeOfBlock - sizeof(IMAGE_BASE_RELOCATION)) / sizeof(std::uint16_t));
+				for (std::size_t i = 0u; i < m_nRelocationAmount; ++i, ++m_pRelocationType)
+				{	
+					switch (*m_pRelocationType >> 0xC)
+					{
+#if defined (_WIN64)
+					case IMAGE_REL_BASED_DIR64:
+#else
+					case IMAGE_REL_BASED_HIGHLOW:
+#endif
+						*CH_R_CAST<std::uintptr_t*>(m_TargetBase + m_pRelocation->VirtualAddress + ((*m_pRelocationType) & 0xFFF)) += m_Delta;
+						break;
+					}
+				}
+			}
+		}
+
+		typedef int(__stdcall* DllMain_fn)(std::uintptr_t, DWORD, void*);
+		DllMain_fn DllMain = CH_R_CAST<DllMain_fn>(m_TargetBase + m_LoaderData->m_EntryPoint);
+
+		if (!m_LoaderData->m_ImportDirVA)
+		{
+			// Call EP of our module.
+			DllMain(m_TargetBase, DLL_PROCESS_ATTACH, nullptr/*Maybe allow user to pass custom struct?*/);
+			return;
+		}
+
+		typedef HMODULE(__stdcall* LoadLibraryA_fn)(LPCSTR);
+		LoadLibraryA_fn _LoadLibraryA = CH_R_CAST<LoadLibraryA_fn>(m_LoaderData->m_LoadLibrary);
+
+		typedef FARPROC(__stdcall* GetProcAddress_fn)(HMODULE, LPCSTR);
+		GetProcAddress_fn _GetProcAddress = CH_R_CAST<GetProcAddress_fn>(m_LoaderData->m_GetProcAddress);
+
+		// Fix up imports.
+		PIMAGE_IMPORT_DESCRIPTOR m_pImports = CH_R_CAST<PIMAGE_IMPORT_DESCRIPTOR>(m_TargetBase + m_LoaderData->m_ImportDirVA);
+		for (; m_pImports->Name; ++m_pImports)
+		{
+			const HMODULE m_hImportModule = _LoadLibraryA(CH_R_CAST<char*>(m_TargetBase + m_pImports->Name));
+
+			ULONG_PTR* m_pNameReference = CH_R_CAST<ULONG_PTR*>(m_TargetBase + m_pImports->OriginalFirstThunk);
+			ULONG_PTR* m_pThunk = CH_R_CAST<ULONG_PTR*>(m_TargetBase + m_pImports->FirstThunk);
+
+			for (; *m_pNameReference; ++m_pNameReference, ++m_pThunk) 
+			{
+				if (IMAGE_SNAP_BY_ORDINAL(*m_pNameReference)) 
+					*(FARPROC*)m_pThunk = _GetProcAddress(m_hImportModule, CH_R_CAST<char*>(*m_pNameReference & 0xFFFF));
+				else
+				{
+					PIMAGE_IMPORT_BY_NAME m_pThunkData = CH_R_CAST<PIMAGE_IMPORT_BY_NAME>(m_TargetBase + (*m_pNameReference));
+					*(FARPROC*)m_pThunk = _GetProcAddress(m_hImportModule, m_pThunkData->Name);
+				}
+			}
+		}
+		
+		// Call EP of our module.
+		DllMain(m_TargetBase, DLL_PROCESS_ATTACH, nullptr/*Maybe allow user to pass custom struct?*/);
+	};
+
 	// Internal manual map function.
 	bool Process_t::ManualMapInject_Internal(std::uint8_t* m_ImageBuffer, std::size_t m_nImageSize, eManualMapInjectionFlags m_eInjectionFlags)
 	{
@@ -255,7 +339,7 @@ namespace chdr
 		const std::uintptr_t m_TargetBaseAddress = this->Allocate(m_pNTHeaders->OptionalHeader.SizeOfImage/*0x1000*/, PAGE_EXECUTE_READWRITE);
 
 		// Copy over PE Header to target process.
-		if (!this->Write(m_TargetBaseAddress, m_ImageBuffer, m_pNTHeaders->OptionalHeader.SizeOfImage/*0x1000*/))
+		if (!this->Write(m_TargetBaseAddress, m_ImageBuffer, m_pNTHeaders->OptionalHeader.SizeOfImage))
 		{
 			CH_LOG("Couldn't copy over PE header data to target process.");
 			return false;
@@ -267,33 +351,79 @@ namespace chdr
 			const std::uintptr_t m_Address = m_TargetBaseAddress + m_pSectionHeaders->VirtualAddress;
 			const std::uint8_t m_WrittenData = m_ImageBuffer[m_pSectionHeaders->PointerToRawData];
 
-			if (!this->Write(m_Address, m_WrittenData, m_pSectionHeaders->SizeOfRawData))
+			if (!this->Write(m_Address, &m_ImageBuffer[m_pSectionHeaders->PointerToRawData], m_pSectionHeaders->SizeOfRawData))
 			{
 				CH_LOG("Couldn't copy over section %s's data to target process.", CH_R_CAST<char*>(m_pSectionHeaders->Name));
 				return false;
 			}
 		}
 
-		// Data to pass through our shellcode.
-		struct LoaderData_t {
-			std::uintptr_t m_ModuleBase = 0u, m_LoadLibrary = 0u, m_GetProcAddress = 0u;
-		} LoaderData;
-
 		// Populate loader data structure.
 		LoaderData.m_ModuleBase = m_TargetBaseAddress;
+		LoaderData.m_ImageBase = CH_S_CAST<std::uintptr_t>(m_pNTHeaders->OptionalHeader.ImageBase);
+		LoaderData.m_EntryPoint = CH_S_CAST<std::uintptr_t>(m_pNTHeaders->OptionalHeader.AddressOfEntryPoint);
 		LoaderData.m_LoadLibrary = CH_R_CAST<std::uintptr_t>(LoadLibraryA);
 		LoaderData.m_GetProcAddress = CH_R_CAST<std::uintptr_t>(GetProcAddress);
+		LoaderData.m_RelocDirVA = CH_S_CAST<std::uint32_t>(m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress);
+		LoaderData.m_RelocDirSize = CH_S_CAST<std::uint32_t>(m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size);
+		LoaderData.m_ImportDirVA = CH_S_CAST<std::uint32_t>(m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+
+		// Fix up data if we've built with mismatched architecture.
+		if (m_pNTHeaders->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC)
+		{
+#if defined (_WIN64) // Didn't already have NT_HEADERS32 data.
+			const PIMAGE_NT_HEADERS32 m_NT32Temporary = CH_R_CAST<PIMAGE_NT_HEADERS32>(m_pNTHeaders);
+			LoaderData.m_EntryPoint = CH_S_CAST<std::uintptr_t>(m_NT32Temporary->OptionalHeader.AddressOfEntryPoint);
+			LoaderData.m_RelocDirVA = CH_S_CAST<std::uint32_t>(m_NT32Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress);
+			LoaderData.m_RelocDirSize = CH_S_CAST<std::uint32_t>(m_NT32Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size);
+			LoaderData.m_ImportDirVA = CH_S_CAST<std::uint32_t>(m_NT32Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+#endif
+		}
+		else if (m_pNTHeaders->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
+		{
+#if defined (_WIN32) // Didn't already have NT_HEADERS64 data.
+			const PIMAGE_NT_HEADERS64 m_NT64Temporary = CH_R_CAST<PIMAGE_NT_HEADERS64>(m_pNTHeaders);
+			LoaderData.m_EntryPoint = CH_S_CAST<std::uintptr_t>(m_NT64Temporary->OptionalHeader.AddressOfEntryPoint);
+			LoaderData.m_RelocDirVA = CH_S_CAST<std::uint32_t>(m_NT64Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress);
+			LoaderData.m_RelocDirSize = CH_S_CAST<std::uint32_t>(m_NT64Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size);
+			LoaderData.m_ImportDirVA = CH_S_CAST<std::uint32_t>(m_NT64Temporary->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+#endif
+		}
 
 		// Address our loader data will be in context of target process.
 		const std::uintptr_t m_LoaderDataAddress = this->Allocate(sizeof(LoaderData_t), PAGE_EXECUTE_READWRITE);
 
+		// Copy over loader data to target process.
 		if (!this->Write(m_LoaderDataAddress, &LoaderData, sizeof(LoaderData_t)))
 		{
 			CH_LOG("Couldn't copy over loader data to target process.");
 			return false;
 		}
 
-		// TODO:
+		if (m_eInjectionFlags & eManualMapInjectionFlags::INJECTION_MODE_THREADHIJACK)
+			// Hijack an existing thread in target process to execute our shellcode.
+		{
+			// TODO:
+		}
+		else
+			// Simply CreateRemoteThread in target process to execute our shellcode.
+		{
+			// Address our loader data will be in context of target process.
+			const std::uintptr_t m_ShellcodeAddress = this->Allocate(4096, PAGE_EXECUTE_READWRITE);
+			if (!WriteProcessMemory(this->m_hTargetProcessHandle, (LPVOID)m_ShellcodeAddress, Shellcode, 4096, nullptr))
+			{
+				CH_LOG("Couldn't copy over loader shellcode to target process.");
+				return false;
+			}
+
+			const std::int32_t m_nThreadResult = this->_CreateRemoteThread(CH_R_CAST<LPVOID>(m_ShellcodeAddress), CH_R_CAST<LPVOID>(m_LoaderDataAddress));
+			if (m_nThreadResult <= 0)
+			{
+				CH_LOG("Failed to create remote thread in target process with code %i.", m_nThreadResult);
+				return false;
+			}
+		}
+
 		return true;
 	}
 
@@ -328,19 +458,20 @@ namespace chdr
 			return false;
 		}
 
-		return ManualMapInject_Internal(m_ImageBuffer, m_nImageSize);
+		return ManualMapInject_Internal(m_ImageBuffer, m_nImageSize, m_eInjectionFlags);
 	}
 
 	// Manual map injection from ImageFile_t.
 	bool Process_t::ManualMapInject(ImageFile_t& m_ImageFile, eManualMapInjectionFlags m_eInjectionFlags)
 	{
-		if (!m_ImageFile.m_ImageBuffer.size())
+		const std::size_t m_nImageSize = m_ImageFile.m_ImageBuffer.size();
+		if (!m_nImageSize)
 		{
 			CH_LOG("Couldn't parse desired ImageFile_t to manual map.");
 			return false;
 		}
 
-		const std::uint8_t* m_TrueImageBuffer = m_ImageFile.m_ImageBuffer.data();
+		return ManualMapInject_Internal(m_ImageFile.m_ImageBuffer.data(), m_nImageSize, m_eInjectionFlags);
 	}
 
 	// LoadLibrary injection from module on disk.
@@ -363,12 +494,7 @@ namespace chdr
 		}
 
 		// Load DLL by invoking LoadLibrary(m_szDLLPath) in a target process
-		const HANDLE m_hRemoteThread = this->_CreateRemoteThread(CH_R_CAST<LPVOID>(LoadLibraryA), CH_R_CAST<LPVOID>(m_AllocatedMemory));
-		if (!m_hRemoteThread || m_hRemoteThread == INVALID_HANDLE_VALUE)
-		{
-			CH_LOG("Couldn't create remote thread to target process. Error code was #%i", GetLastError());
-			return false;
-		}
+		this->_CreateRemoteThread(CH_R_CAST<LPVOID>(LoadLibraryA), CH_R_CAST<LPVOID>(m_AllocatedMemory));
 
 		return true;
 	}
@@ -547,7 +673,7 @@ namespace chdr
 
 	// WriteProcessMemory implementation.
 	template<typename S>
-	std::size_t Process_t::Write(std::uintptr_t m_WriteAddress, const S& m_WriteValue)
+	std::size_t Process_t::Write(std::uintptr_t m_WriteAddress, S m_WriteValue)
 	{
 		SIZE_T lpNumberOfBytesWritten = NULL; // Fuck you MSVC.
 		if (!WriteProcessMemory(this->m_hTargetProcessHandle, (LPVOID)m_WriteAddress, (LPCVOID)m_WriteValue, sizeof(S), &lpNumberOfBytesWritten))
@@ -560,7 +686,7 @@ namespace chdr
 
 	// WriteProcessMemory implementation.
 	template<typename S>
-	std::size_t Process_t::Write(std::uintptr_t m_WriteAddress, const S& m_WriteValue, std::size_t m_WriteSize)
+	std::size_t Process_t::Write(std::uintptr_t m_WriteAddress, S m_WriteValue, std::size_t m_WriteSize)
 	{
 		SIZE_T lpNumberOfBytesWritten = NULL; // Fuck you MSVC.
 		if (!WriteProcessMemory(this->m_hTargetProcessHandle, (LPVOID)m_WriteAddress, (LPCVOID)m_WriteValue, m_WriteSize, &lpNumberOfBytesWritten))
@@ -602,9 +728,9 @@ namespace chdr
 	}
 
 	// CreateRemoteThread implementation.
-	HANDLE Process_t::_CreateRemoteThread(LPVOID m_lpStartAddress, LPVOID m_lpParameter)
+	std::int32_t Process_t::_CreateRemoteThread(LPVOID m_lpStartAddress, LPVOID m_lpParameter)
 	{
-		return CreateRemoteThread(this->m_hTargetProcessHandle,
+		HANDLE m_hRemoteThread = CreateRemoteThread(this->m_hTargetProcessHandle,
 			NULL,
 			NULL,
 			CH_R_CAST<LPTHREAD_START_ROUTINE>(m_lpStartAddress),
@@ -612,6 +738,13 @@ namespace chdr
 			NULL,
 			NULL
 		);
+
+		if (!m_hRemoteThread || m_hRemoteThread == INVALID_HANDLE_VALUE)
+			return 0;
+
+		// TODO: Good idea to wait for thread to ensure response?
+
+		return 1;
 	}
 }
 
@@ -705,23 +838,19 @@ namespace chdr
 			{
 				const CV_INFO_PDB70* m_PDBInfo = CH_R_CAST<CV_INFO_PDB70*>(m_ImageBuffer + this->RvaToOffset(m_DebugDirectoryData->AddressOfRawData));
 
-				wchar_t m_GUIDStr[MAX_PATH];
-				if (StringFromGUID2(m_PDBInfo->Signature, m_GUIDStr, sizeof(m_GUIDStr)))
+				wchar_t m_wszGUIDStr[MAX_PATH];
+				if (!StringFromGUID2(m_PDBInfo->Signature, m_wszGUIDStr, sizeof(m_wszGUIDStr)))
+					// Couldn't read GUID, whatever lol.
+					this->m_DebugData = { (char*)m_PDBInfo->PdbFileName, "", m_PDBInfo->Age, m_PDBInfo->CvSignature };
+				else
 				{
-					m_GUIDStr[MAX_PATH - 1] = '\0';
+					m_wszGUIDStr[MAX_PATH - 1] = '\0';
 
 					// wchar_t->string
-					_bstr_t m_szPreGUIDStr(m_GUIDStr);
+					_bstr_t m_szPreGUIDStr(m_wszGUIDStr);
 
 					this->m_DebugData = {
 						(char*)m_PDBInfo->PdbFileName, std::string(m_szPreGUIDStr),
-						m_PDBInfo->Age, m_PDBInfo->CvSignature
-					};
-				}
-				else
-				{
-					this->m_DebugData = {
-						(char*)m_PDBInfo->PdbFileName, "",
 						m_PDBInfo->Age, m_PDBInfo->CvSignature
 					};
 				}
@@ -804,7 +933,7 @@ namespace chdr
 		if (m_ParseType & PEHEADER_PARSING_TYPE::TYPE_NONE)
 			return;
 
-		const std::uintptr_t m_BaseAddress = m_CustomBaseAddress != NULL ? m_CustomBaseAddress : m_Process.GetBaseAddress();
+		const std::uintptr_t m_BaseAddress = m_CustomBaseAddress != 0u ? m_CustomBaseAddress : m_Process.GetBaseAddress();
 		CH_ASSERT(true, m_BaseAddress, "Couldn't find base address of target process.");
 
 		IMAGE_DOS_HEADER m_pDOSHeadersTemporary = m_Process.Read<IMAGE_DOS_HEADER>(m_BaseAddress);
@@ -879,23 +1008,19 @@ namespace chdr
 			{
 				const CV_INFO_PDB70 m_PDBInfo = m_Process.Read<CV_INFO_PDB70>(m_BaseAddress + m_DebugDirectoryData.AddressOfRawData);
 
-				wchar_t m_GUIDStr[MAX_PATH];
-				if (StringFromGUID2(m_PDBInfo.Signature, m_GUIDStr, sizeof(m_GUIDStr)))
+				wchar_t m_wszGUIDStr[MAX_PATH];
+				if (!StringFromGUID2(m_PDBInfo.Signature, m_wszGUIDStr, sizeof(m_wszGUIDStr)))
+					// Couldn't read GUID, whatever lol.
+					this->m_DebugData = { (char*)m_PDBInfo.PdbFileName, "", m_PDBInfo.Age, m_PDBInfo.CvSignature };
+				else
 				{
-					m_GUIDStr[MAX_PATH - 1] = '\0';
+					m_wszGUIDStr[MAX_PATH - 1] = '\0';
 
 					// wchar_t->string
-					_bstr_t m_szPreGUIDStr(m_GUIDStr);
+					_bstr_t m_szPreGUIDStr(m_wszGUIDStr);
 
 					this->m_DebugData = {
 						(char*)m_PDBInfo.PdbFileName, std::string(m_szPreGUIDStr),
-						m_PDBInfo.Age, m_PDBInfo.CvSignature
-					};
-				}
-				else
-				{
-					this->m_DebugData = {
-						(char*)m_PDBInfo.PdbFileName, "",
 						m_PDBInfo.Age, m_PDBInfo.CvSignature
 					};
 				}
@@ -1117,7 +1242,7 @@ namespace chdr
 	}
 
 	// Get desired export address by name.
-	std::uintptr_t PEHeaderData_t::_GetProcAddress(const char* m_szExportName)
+	std::uintptr_t PEHeaderData_t::GetRemoteProcAddress(const char* m_szExportName)
 	{
 		if (this->GetExportData().empty() ||
 			this->GetExportData().find(m_szExportName) != this->GetExportData().end())
@@ -1439,7 +1564,7 @@ namespace chdr
 	}
 
 	// Setup module in process by address in processes' memory space.
-	Module_t::Module_t(chdr::Process_t& m_Process, std::uintptr_t m_dModuleBaseAddress, DWORD m_dModuleSize, std::int32_t m_ParseType)
+	Module_t::Module_t(chdr::Process_t& m_Process, std::uintptr_t m_dModuleBaseAddress, std::uint32_t m_dModuleSize, std::int32_t m_ParseType)
 	{
 		this->m_dModuleBaseAddress = m_dModuleBaseAddress;
 		this->m_dModuleSize = m_dModuleSize;
