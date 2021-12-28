@@ -66,7 +66,6 @@ namespace chdr
 		struct ImportData_t
 		{
 			std::string m_szModuleName = "";
-			std::string m_szImportName = "";
 		};
 
 		struct DebugData_t
@@ -88,7 +87,7 @@ namespace chdr
 		// For caching desired data.
 		std::vector<SectionData_t>          m_SectionData = { };
 		std::map<std::string, ExportData_t> m_ExportData = { };
-		std::vector<ImportData_t>           m_ImportData = { };
+		std::map<std::string, ImportData_t>           m_ImportData = { };
 		std::vector<IMAGE_DATA_DIRECTORY>   m_DirectoryData = { };
 		DebugData_t				            m_DebugData = { };
 
@@ -137,22 +136,19 @@ namespace chdr
 		std::map<std::string, ExportData_t> GetExportData();
 
 		// Helper function to get imported functions' data of PE image.
-		std::vector<ImportData_t> GetImportData();
+		std::map<std::string, ImportData_t> GetImportData();
 
 		// Helper function to get debug directories' data of PE image.
 		DebugData_t GetDebugData();
 
 		// Convert relative virtual address to file offset.
-		std::uint32_t RvaToOffset(std::uint32_t m_dRva);
+		std::uint32_t RvaToOffset(std::uint32_t m_nRva);
 
 		// Convert file offset to relative virtual address.
-		std::uint32_t OffsetToRva(std::uint32_t m_dOffset);
+		std::uint32_t OffsetToRva(std::uint32_t m_nOffset);
 
 		// Get certain section by address in memory.
 		SectionData_t GetSectionByAddress(std::uint32_t m_nAddress);
-
-		// Get desired export address by name.
-		std::uintptr_t GetRemoteProcAddress(const char* m_szExportName);
 	};
 
 	// PE Image utility helpers
@@ -251,9 +247,9 @@ namespace chdr
 
 	class Thread_t
 	{
-		// Basic thread information.
-		std::uint32_t m_dThreadID = 0;
-		HANDLE m_hThreadHandle = { };
+		//// Basic thread information.
+		//std::uint32_t m_dThreadID = 0;
+		//HANDLE m_hThreadHandle = { };
 
 		// Acts as a lock, to only resume threads previously suspended.
 		bool m_bIsThreadManuallySuspended = false;
@@ -262,6 +258,8 @@ namespace chdr
 		bool m_bShouldFreeHandleAtDestructor = false;
 
 	public:
+		std::uint32_t m_dThreadID = 0;
+		HANDLE m_hThreadHandle = { };
 		enum THREADINFOCLASS {
 			ThreadBasicInformation,
 			ThreadTimes,
@@ -305,6 +303,12 @@ namespace chdr
 
 		// Resuming a target thread.
 		void Resume();
+
+		// Get context of this thread.
+		CONTEXT GetThreadCTX();
+
+		// Set context of this thread.
+		void SetThreadCTX(CONTEXT m_Context);
 
 		// Check which module this thread is associated with.
 		std::string GetOwningModule(chdr::Process_t& m_Process, bool m_bUseCachedData = true);
@@ -493,8 +497,8 @@ namespace chdr
 		// Relevant information pertaining a target thread.
 		struct ThreadInformation_t
 		{
-			std::uint32_t		m_dThreadID = 0;
-			std::uint32_t		m_dThreadStartAddress = 0;
+			std::uint32_t		m_nThreadID = 0;
+			std::uint32_t		m_nThreadStartAddress = 0;
 			bool		        m_bIsThreadSuspended = false;
 		};
 
@@ -522,7 +526,7 @@ namespace chdr
 		std::string GetProcessPath_Internal();
 
 		// Internal manual map function.
-		bool ManualMapInject_Internal(std::uint8_t* m_ImageBuffer, std::size_t m_nImageSize, eManualMapInjectionFlags m_eInjectionFlags = eManualMapInjectionFlags::INJECTION_NONE);
+		bool ManualMapInject_Internal(std::uint8_t* m_ImageBuffer, std::size_t m_nImageSize, std::int32_t m_eInjectionFlags = eManualMapInjectionFlags::INJECTION_NONE);
 	public:
 
 		// Helper function to get architecture of target process. 
@@ -562,13 +566,13 @@ namespace chdr
 		bool IsBeingDebugged();
 
 		// Manual map injection from module on disk.
-		bool ManualMapInject(const char* m_szDLLPath, eManualMapInjectionFlags m_eInjectionFlags = eManualMapInjectionFlags::INJECTION_NONE);
+		bool ManualMapInject(const char* m_szDLLPath, std::int32_t m_eInjectionFlags = eManualMapInjectionFlags::INJECTION_NONE);
 
 		// Manual map injection from module in memory.
-		bool ManualMapInject(std::uint8_t* m_ImageBuffer, std::size_t m_nImageSize, eManualMapInjectionFlags m_eInjectionFlags = eManualMapInjectionFlags::INJECTION_NONE);
+		bool ManualMapInject(std::uint8_t* m_ImageBuffer, std::size_t m_nImageSize, std::int32_t m_eInjectionFlags = eManualMapInjectionFlags::INJECTION_NONE);
 
 		// Manual map injection from ImageFile_t.
-		bool ManualMapInject(ImageFile_t& m_ImageFile, eManualMapInjectionFlags m_eInjectionFlags = eManualMapInjectionFlags::INJECTION_NONE);
+		bool ManualMapInject(ImageFile_t& m_ImageFile, std::int32_t m_eInjectionFlags = eManualMapInjectionFlags::INJECTION_NONE);
 
 		// LoadLibrary injection from module on disk.
 		bool LoadLibraryInject(const char* m_szDLLPath);
@@ -588,6 +592,9 @@ namespace chdr
 		// Resume every previously suspended thread in a target process.
 		void Resume();
 
+		// Get desired export address by name.
+		std::uintptr_t GetRemoteProcAddress(const char* m_szModuleName, const char* m_szExportName);
+
 		// ReadProcessMemory implementation.
 		template <class T>
 		T Read(std::uintptr_t m_ReadAddress);
@@ -598,11 +605,11 @@ namespace chdr
 
 		// WriteProcessMemory implementation.
 		template<typename S>
-		std::size_t Write(std::uintptr_t m_WriteAddress,  S m_WriteValue);
+		std::size_t Write(std::uintptr_t m_WriteAddress, S m_WriteValue);
 
 		// WriteProcessMemory implementation.
 		template<typename S>
-		std::size_t Write(std::uintptr_t m_WriteAddress,  S m_WriteValue, std::size_t m_WriteSize);
+		std::size_t Write(std::uintptr_t m_WriteAddress, S m_WriteValue, std::size_t m_WriteSize);
 
 		// VirtualAllocEx implementation.
 		std::uintptr_t Allocate(std::size_t m_AllocationSize, DWORD m_dProtectionType);

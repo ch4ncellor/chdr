@@ -217,7 +217,7 @@ namespace chdr
 	{
 		NtQueryInformationProcess_fn NtQueryInformationProcess =
 			CH_R_CAST<NtQueryInformationProcess_fn>(GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtQueryInformationProcess"));
-	
+
 		PROCESS_BASIC_INFORMATION m_ProcessBasicInformation;
 
 		// Get address where PEB resides in this target process.
@@ -233,7 +233,8 @@ namespace chdr
 		return m_PEB;
 	}
 
-	struct CustomPassthrough_t {
+	// Custom struct to pass through as lpReserved to communicate extra data to module.
+	struct TransmittedData_t {
 		char szKey[256];
 	};
 
@@ -241,7 +242,7 @@ namespace chdr
 	struct LoaderData_t {
 		std::uintptr_t m_ModuleBase = 0u, m_ImageBase = 0u, m_EntryPoint = 0u, m_LoadLibrary = 0u, m_GetProcAddress = 0u;
 		std::uint32_t  m_RelocDirVA = 0u, m_RelocDirSize = 0u, m_ImportDirVA = 0u;
-		CustomPassthrough_t m_CustomPassthrough = {};
+		TransmittedData_t m_CustomTransmitted = {};
 	} LoaderData;
 
 	// Code to fix up needed data, then execute DllMain in target process.
@@ -258,7 +259,7 @@ namespace chdr
 		{
 			PIMAGE_BASE_RELOCATION m_pRelocation = CH_R_CAST<PIMAGE_BASE_RELOCATION>(m_TargetBase + m_LoaderData->m_RelocDirVA);
 			PIMAGE_BASE_RELOCATION m_pRelocationEnd = CH_R_CAST<PIMAGE_BASE_RELOCATION>(CH_R_CAST<std::uintptr_t>(m_pRelocation) + m_LoaderData->m_RelocDirSize - sizeof(IMAGE_BASE_RELOCATION)/*?*/);
-			
+
 			for (; m_pRelocation < m_pRelocationEnd;
 				m_pRelocation = CH_R_CAST<PIMAGE_BASE_RELOCATION>(CH_R_CAST<std::uintptr_t>(m_pRelocation) + m_pRelocation->SizeOfBlock))
 			{
@@ -266,7 +267,7 @@ namespace chdr
 
 				const std::size_t m_nRelocationAmount = CH_S_CAST<std::size_t>((m_pRelocation->SizeOfBlock - sizeof(IMAGE_BASE_RELOCATION)) / sizeof(std::uint16_t));
 				for (std::size_t i = 0u; i < m_nRelocationAmount; ++i, ++m_pRelocationType)
-				{	
+				{
 					switch (*m_pRelocationType >> 0xC)
 					{
 #if defined (_WIN64)
@@ -287,7 +288,9 @@ namespace chdr
 		if (!m_LoaderData->m_ImportDirVA)
 		{
 			// Call EP of our module.
-			DllMain(m_TargetBase, DLL_PROCESS_ATTACH, (void*)&m_LoaderData->m_CustomPassthrough/*nullptr*//*Maybe allow user to pass custom struct?*/);
+			DllMain(m_TargetBase,
+				DLL_PROCESS_ATTACH,
+				CH_R_CAST<void*>(&m_LoaderData->m_CustomTransmitted));
 			return;
 		}
 
@@ -306,9 +309,9 @@ namespace chdr
 			ULONG_PTR* m_pNameReference = CH_R_CAST<ULONG_PTR*>(m_TargetBase + m_pImports->OriginalFirstThunk);
 			ULONG_PTR* m_pThunk = CH_R_CAST<ULONG_PTR*>(m_TargetBase + m_pImports->FirstThunk);
 
-			for (; *m_pNameReference; ++m_pNameReference, ++m_pThunk) 
+			for (; *m_pNameReference; ++m_pNameReference, ++m_pThunk)
 			{
-				if (IMAGE_SNAP_BY_ORDINAL(*m_pNameReference)) 
+				if (IMAGE_SNAP_BY_ORDINAL(*m_pNameReference))
 					*(FARPROC*)m_pThunk = _GetProcAddress(m_hImportModule, CH_R_CAST<char*>(*m_pNameReference & 0xFFFF));
 				else
 				{
@@ -317,13 +320,15 @@ namespace chdr
 				}
 			}
 		}
-		
+
 		// Call EP of our module.
-		DllMain(m_TargetBase, DLL_PROCESS_ATTACH, (void*)&m_LoaderData->m_CustomPassthrough/*nullptr*//*Maybe allow user to pass custom struct?*/);
+		DllMain(m_TargetBase,
+			DLL_PROCESS_ATTACH,
+			CH_R_CAST<void*>(&m_LoaderData->m_CustomTransmitted));
 	};
 
 	// Internal manual map function.
-	bool Process_t::ManualMapInject_Internal(std::uint8_t* m_ImageBuffer, std::size_t m_nImageSize, eManualMapInjectionFlags m_eInjectionFlags)
+	bool Process_t::ManualMapInject_Internal(std::uint8_t* m_ImageBuffer, std::size_t m_nImageSize, std::int32_t m_eInjectionFlags)
 	{
 		// Grab DOS header.
 		const PIMAGE_DOS_HEADER m_pDosHeaders = CH_R_CAST<PIMAGE_DOS_HEADER>(m_ImageBuffer);
@@ -350,21 +355,22 @@ namespace chdr
 			CH_LOG("Couldn't copy over PE header data to target process.");
 			return false;
 		}
+
 		// Copy over needed sections to target process.
 		PIMAGE_SECTION_HEADER m_pSectionHeaders = IMAGE_FIRST_SECTION(m_pNTHeaders);
-		for (std::size_t i = 0u; i != m_pNTHeaders->FileHeader.NumberOfSections; ++i, ++m_pSectionHeaders)
+		for (std::size_t i = 0u; i < m_pNTHeaders->FileHeader.NumberOfSections; ++i, ++m_pSectionHeaders)
 		{
 			const std::uintptr_t m_Address = m_TargetBaseAddress + m_pSectionHeaders->VirtualAddress;
 			if (!this->Write(m_Address, &m_ImageBuffer[m_pSectionHeaders->PointerToRawData], m_pSectionHeaders->SizeOfRawData))
 			{
-				CH_LOG("Couldn't copy over section %s's data to target process.", CH_R_CAST<char*>(m_pSectionHeaders->Name));
+				CH_LOG("Couldn't copy over %s section's data to target process.", CH_R_CAST<char*>(m_pSectionHeaders->Name));
 				return false;
 			}
 		}
 
 		// Can use this to communicate some data to the target process.
 		// lpReserved parameter in DllMain is unused, so popping our custom struct here is all good.
-		CustomPassthrough_t m_CustomTransmittedData = {};
+		TransmittedData_t m_CustomTransmittedData = {};
 		strcpy_s<256>(m_CustomTransmittedData.szKey, "Hello from the other side!");
 
 		// Populate loader data structure.
@@ -415,13 +421,14 @@ namespace chdr
 		if (m_eInjectionFlags & eManualMapInjectionFlags::INJECTION_MODE_THREADHIJACK)
 			// Hijack an existing thread in target process to execute our shellcode.
 		{
-			// TODO:
 		}
 		else
 			// Simply CreateRemoteThread in target process to execute our shellcode.
 		{
-			// Address our loader data will be in context of target process.
+			// Address our shellcode will be in context of target process.
 			const std::uintptr_t m_ShellcodeAddress = this->Allocate(4096, PAGE_EXECUTE_READWRITE);
+
+			// Copy over shellcode to target process.
 			if (!this->Write(m_ShellcodeAddress, Shellcode, 4096))
 			{
 				CH_LOG("Couldn't copy over loader shellcode to target process.");
@@ -440,7 +447,7 @@ namespace chdr
 	}
 
 	// Manual map injection from module on disk.
-	bool Process_t::ManualMapInject(const char* m_szDLLPath, eManualMapInjectionFlags m_eInjectionFlags)
+	bool Process_t::ManualMapInject(const char* m_szDLLPath, std::int32_t m_eInjectionFlags)
 	{
 		ByteArray_t m_FileImageBuffer = { 0 };
 
@@ -462,7 +469,7 @@ namespace chdr
 	}
 
 	// Manual map injection from module in memory.
-	bool Process_t::ManualMapInject(std::uint8_t* m_ImageBuffer, std::size_t m_nImageSize, eManualMapInjectionFlags m_eInjectionFlags)
+	bool Process_t::ManualMapInject(std::uint8_t* m_ImageBuffer, std::size_t m_nImageSize, std::int32_t m_eInjectionFlags)
 	{
 		if (!m_nImageSize)
 		{
@@ -474,7 +481,7 @@ namespace chdr
 	}
 
 	// Manual map injection from ImageFile_t.
-	bool Process_t::ManualMapInject(ImageFile_t& m_ImageFile, eManualMapInjectionFlags m_eInjectionFlags)
+	bool Process_t::ManualMapInject(ImageFile_t& m_ImageFile, std::int32_t m_eInjectionFlags)
 	{
 		const std::size_t m_nImageSize = m_ImageFile.m_ImageBuffer.size();
 		if (!m_nImageSize)
@@ -664,6 +671,26 @@ namespace chdr
 		CH_ASSERT(false, this->m_bIsProcessManuallySuspended == false, "Failed to resume suspended process!");
 	}
 
+	// Get desired export address by name.
+	std::uintptr_t Process_t::GetRemoteProcAddress(const char* m_szModuleName, const char* m_szExportName)
+	{
+		chdr::Module_t m_Module(*this,
+			m_szModuleName,
+			PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_EXPORT_DIRECTORY // Only parse exports.
+		);
+
+		if (!m_Module.IsValid() || !m_Module.GetPEHeaderData().IsValid())
+			return 0u;
+
+		auto ExportData = m_Module.GetPEHeaderData().GetExportData();
+		if (ExportData.empty() || ExportData.find(m_szExportName) == ExportData.end())
+			// Ensure we even have this export in our map.		
+			return 0u;
+
+		return ExportData[m_szExportName].m_nAddress;
+	}
+
+
 	// ReadProcessMemory implementation.
 	template <class T>
 	T Process_t::Read(std::uintptr_t m_ReadAddress)
@@ -763,6 +790,7 @@ namespace chdr
 
 		// TODO: Good idea to wait for thread to ensure response?
 
+		CloseHandle(m_hRemoteThread);
 		return 1;
 	}
 }
@@ -940,7 +968,7 @@ namespace chdr
 					char* m_szFunctionName = CH_R_CAST<char*>(m_ImageBuffer + this->RvaToOffset(std::uint32_t(m_pThunkData->u1.AddressOfData + 2)));
 
 					// Cache desired data.
-					this->m_ImportData.push_back({ m_szModuleName, m_szFunctionName });
+					this->m_ImportData[m_szFunctionName] = { m_szModuleName };
 				}
 			}
 		}
@@ -1152,7 +1180,7 @@ namespace chdr
 					// Read function name.
 					char m_szFunctionName[MAX_PATH];
 					const std::size_t m_ReadNameBytes = m_Process.Read(m_BaseAddress + std::uintptr_t(m_pThunkData.u1.AddressOfData) + 2, m_szFunctionName, sizeof(m_szFunctionName));
-			
+
 					if (m_ReadNameBytes == 0u)
 						// Something went wrong while reading imp name, don't cache this.
 						continue;
@@ -1160,7 +1188,7 @@ namespace chdr
 					m_szFunctionName[MAX_PATH - 1] = '\0';
 
 					// Cache desired data.
-					this->m_ImportData.push_back({ m_szModuleName, m_szFunctionName });
+					this->m_ImportData[m_szFunctionName] = { m_szModuleName };
 				}
 			}
 		}
@@ -1211,7 +1239,7 @@ namespace chdr
 	}
 
 	// Helper function to get imported functions' data of PE image.
-	std::vector<PEHeaderData_t::ImportData_t> PEHeaderData_t::GetImportData()
+	std::map<std::string, PEHeaderData_t::ImportData_t> PEHeaderData_t::GetImportData()
 	{
 		return this->m_ImportData;
 	}
@@ -1222,28 +1250,28 @@ namespace chdr
 		return this->m_DebugData;
 	}
 	// Convert relative virtual address to file offset.
-	std::uint32_t PEHeaderData_t::RvaToOffset(std::uint32_t m_dRva)
+	std::uint32_t PEHeaderData_t::RvaToOffset(std::uint32_t m_nRva)
 	{
 		for (const auto& SectionData : this->GetSectionData())
 		{
-			if (m_dRva < SectionData.m_Address ||
-				m_dRva > SectionData.m_Address + SectionData.m_Size)
+			if (m_nRva < SectionData.m_Address ||
+				m_nRva > SectionData.m_Address + SectionData.m_Size)
 				continue;
 
-			return SectionData.m_PointerToRawData + m_dRva - SectionData.m_Address;
+			return SectionData.m_PointerToRawData + m_nRva - SectionData.m_Address;
 		}
 		return NULL;
 	}
 
-	std::uint32_t PEHeaderData_t::OffsetToRva(std::uint32_t m_dOffset)
+	std::uint32_t PEHeaderData_t::OffsetToRva(std::uint32_t m_nOffset)
 	{
 		for (const auto& SectionData : this->GetSectionData())
 		{
-			if (m_dOffset < SectionData.m_PointerToRawData ||
-				m_dOffset > SectionData.m_Address + SectionData.m_Size)
+			if (m_nOffset < SectionData.m_PointerToRawData ||
+				m_nOffset > SectionData.m_Address + SectionData.m_Size)
 				continue;
 
-			return SectionData.m_Address + m_dOffset - SectionData.m_PointerToRawData;
+			return SectionData.m_Address + m_nOffset - SectionData.m_PointerToRawData;
 		}
 		return NULL;
 	}
@@ -1261,17 +1289,6 @@ namespace chdr
 			return SectionData;
 		}
 		return {}; // Wtf. Couldn't find.
-	}
-
-	// Get desired export address by name.
-	std::uintptr_t PEHeaderData_t::GetRemoteProcAddress(const char* m_szExportName)
-	{
-		if (this->GetExportData().empty() ||
-			this->GetExportData().find(m_szExportName) == this->GetExportData().end())
-			// Ensure we even have this export in our map.		
-			return 0u;
-
-		return this->GetExportData()[m_szExportName].m_nAddress;
 	}
 }
 
@@ -1510,6 +1527,20 @@ namespace chdr
 
 		this->m_bIsThreadManuallySuspended = ResumeThread(this->m_hThreadHandle) == 0;
 		CH_ASSERT(true, !this->m_bIsThreadManuallySuspended, "Failed to resume thread with TID %i!", this->m_dThreadID);
+	}
+
+	// Get context of this thread.
+	CONTEXT Thread_t::GetThreadCTX()
+	{
+		CONTEXT result; { result.ContextFlags = CONTEXT_FULL; }
+		GetThreadContext(this->m_hThreadHandle, &result);
+		return result;
+	}
+
+	// Set context of this thread.
+	void Thread_t::SetThreadCTX(CONTEXT m_Context)
+	{
+		SetThreadContext(this->m_hThreadHandle, &m_Context);
 	}
 
 	// Check which module this thread is associated with.
