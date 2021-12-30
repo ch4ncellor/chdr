@@ -5,7 +5,8 @@
 #include <winnt.h>
 #include <TlHelp32.h>
 #include <fstream>
-#include <comdef.h>
+#include <comdef.h> 
+#include <functional>
 #include <map>
 #include <Psapi.h>
 #include <filesystem>
@@ -21,7 +22,7 @@ namespace chdr
 #ifdef SHOULD_PRINT_DEBUG_LOGS
 	// Custom debug assert/log.
 #define CH_LOG(s, ...) { std::printf("[!] "); std::printf(s, __VA_ARGS__); std::printf("\n"); }
-#define CH_ASSERT(x, b, s, ...) if (!(b)) {  if (s) CH_LOG(s, __VA_ARGS__) if constexpr (x) return;  }
+#define CH_ASSERT(x, b, s, ...) if (!(b)) {  CH_LOG(s, __VA_ARGS__) if constexpr (x) return;  }
 #else
 	// Custom debug assert/log.
 #define CH_LOG(s, ...) (void)0
@@ -247,9 +248,9 @@ namespace chdr
 
 	class Thread_t
 	{
-		//// Basic thread information.
-		//std::uint32_t m_dThreadID = 0;
-		//HANDLE m_hThreadHandle = { };
+		// Basic thread information.
+		std::uint32_t m_dThreadID = 0;
+		HANDLE m_hThreadHandle = { };
 
 		// Acts as a lock, to only resume threads previously suspended.
 		bool m_bIsThreadManuallySuspended = false;
@@ -258,8 +259,6 @@ namespace chdr
 		bool m_bShouldFreeHandleAtDestructor = false;
 
 	public:
-		std::uint32_t m_dThreadID = 0;
-		HANDLE m_hThreadHandle = { };
 		enum THREADINFOCLASS {
 			ThreadBasicInformation,
 			ThreadTimes,
@@ -511,8 +510,17 @@ namespace chdr
 			std::uintptr_t m_BaseAddress = 0u;
 		};
 
+		struct AllocatedMemoryData_t
+		{
+			std::uintptr_t m_AllocatedAddress = 0u;
+			std::size_t m_nAllocatedSize = 0u;
+		};
+
 		// Caching all loaded modules in target process.
 		std::vector<Process_t::ModuleInformation_t> m_EnumeratedModulesCached = {};
+
+		// Track allocated memory (removed on ::VirtualFreeEx calls).
+		std::map<std::uintptr_t, std::size_t> m_AllocatedMemoryTracker;
 
 		bool m_bHasCachedProcessesModules = false;
 
@@ -526,7 +534,7 @@ namespace chdr
 		std::string GetProcessPath_Internal();
 
 		// Internal manual map function.
-		bool ManualMapInject_Internal(std::uint8_t* m_ImageBuffer, std::size_t m_nImageSize, std::int32_t m_eInjectionFlags = eManualMapInjectionFlags::INJECTION_NONE);
+		bool ManualMapInject_Internal(std::uint8_t* m_ImageBuffer,  std::int32_t m_eInjectionFlags = eManualMapInjectionFlags::INJECTION_NONE);
 	public:
 
 		// Helper function to get architecture of target process. 
@@ -569,7 +577,7 @@ namespace chdr
 		bool ManualMapInject(const char* m_szDLLPath, std::int32_t m_eInjectionFlags = eManualMapInjectionFlags::INJECTION_NONE);
 
 		// Manual map injection from module in memory.
-		bool ManualMapInject(std::uint8_t* m_ImageBuffer, std::size_t m_nImageSize, std::int32_t m_eInjectionFlags = eManualMapInjectionFlags::INJECTION_NONE);
+		bool ManualMapInject(std::uint8_t* m_ImageBuffer, std::int32_t m_eInjectionFlags = eManualMapInjectionFlags::INJECTION_NONE);
 
 		// Manual map injection from ImageFile_t.
 		bool ManualMapInject(ImageFile_t& m_ImageFile, std::int32_t m_eInjectionFlags = eManualMapInjectionFlags::INJECTION_NONE);
@@ -612,10 +620,10 @@ namespace chdr
 		std::size_t Write(std::uintptr_t m_WriteAddress, S m_WriteValue, std::size_t m_WriteSize);
 
 		// VirtualAllocEx implementation.
-		std::uintptr_t Allocate(std::size_t m_AllocationSize, DWORD m_dProtectionType);
+		std::uintptr_t Allocate(std::size_t m_AllocationSize, DWORD m_dProtectionType, bool m_bShouldTrack = true);
 
 		// VirtualFreeEx implementation.
-		BOOL Free(LPVOID m_FreeAddress);
+		bool Free(std::uintptr_t m_FreeAddress);
 
 		// VirtualQueryEx implementation.
 		std::size_t Query(LPCVOID m_QueryAddress, MEMORY_BASIC_INFORMATION* m_MemoryInformation);
@@ -627,6 +635,16 @@ namespace chdr
 
 	namespace misc
 	{
+		// This is fine for now, but because the template is class-specific, you can't currently queue more than one type.
+		template <typename Callback, typename... Parameters>
+		class QueuedScopeHandler
+		{
+			std::vector<std::pair<Callback, Parameters...>> m_QueuedCalls;
+		public:
+			QueuedScopeHandler(Callback call, Parameters ...param) { this->AddToTail( call, param...); }
+			~QueuedScopeHandler() { for (const auto& QueuedCalls : this->m_QueuedCalls) std::invoke(QueuedCalls.first, QueuedCalls.second); }
 
+			void AddToTail(Callback call, Parameters ...param) { this->m_QueuedCalls.push_back({ call, param... }); }
+		};
 	}
 }

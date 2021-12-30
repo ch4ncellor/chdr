@@ -71,6 +71,14 @@ namespace chdr
 	// Default dtor
 	Process_t::~Process_t()
 	{
+		// Just to be safe, free all of our allocated memory from this process.
+		if (!this->m_AllocatedMemoryTracker.empty())
+		{
+			for (const auto& ForgottenMemory : this->m_AllocatedMemoryTracker) 
+				CH_LOG(this->Free(ForgottenMemory.first) ? "Successful free of memory at 0x%X with size 0x%X" :
+					"Couldn't free memory at 0x%X with size 0x%X", ForgottenMemory.first, ForgottenMemory.second);
+		}
+
 		// Not allowed to release this HANDLE, or was already released.
 		CH_ASSERT(true,
 			this->m_bShouldFreeHandleAtDestructor &&
@@ -193,13 +201,13 @@ namespace chdr
 		bool m_bIsProcessSuspended = true;
 
 		// Traverse all threads, and ensure each is in a suspended state.
-		for (auto& CurrentThread : this->EnumerateThreads())
+		for (const auto& CurrentThread : this->EnumerateThreads())
 		{
-			if (!CurrentThread.m_bIsThreadSuspended)
-			{
-				m_bIsProcessSuspended = false; // Found a thread that's still alive, cache and exit loop.
-				break;
-			}
+			if (CurrentThread.m_bIsThreadSuspended)
+				continue;
+
+			m_bIsProcessSuspended = false; // Found a thread that's still alive, cache and exit loop.
+			break;
 		}
 		return m_bIsProcessSuspended;
 	}
@@ -241,7 +249,7 @@ namespace chdr
 	// Data to pass through our shellcode.
 	struct LoaderData_t {
 		std::uintptr_t m_ModuleBase = 0u, m_ImageBase = 0u, m_EntryPoint = 0u, m_LoadLibrary = 0u, m_GetProcAddress = 0u;
-		std::uint32_t  m_RelocDirVA = 0u, m_RelocDirSize = 0u, m_ImportDirVA = 0u;
+		std::uint32_t  m_RelocDirVA = 0u, m_RelocDirSize = 0u, m_ImportDirVA = 0u, m_Reason = 0u;
 		TransmittedData_t m_CustomTransmitted = {};
 	} LoaderData;
 
@@ -282,15 +290,13 @@ namespace chdr
 			}
 		}
 
-		typedef int(__stdcall* DllMain_fn)(std::uintptr_t, DWORD, void*);
+		typedef int(__stdcall* DllMain_fn)(std::uintptr_t, std::uint32_t, void*);
 		DllMain_fn DllMain = CH_R_CAST<DllMain_fn>(m_TargetBase + m_LoaderData->m_EntryPoint);
 
 		if (!m_LoaderData->m_ImportDirVA)
 		{
 			// Call EP of our module.
-			DllMain(m_TargetBase,
-				DLL_PROCESS_ATTACH,
-				CH_R_CAST<void*>(&m_LoaderData->m_CustomTransmitted));
+			DllMain(m_TargetBase, m_LoaderData->m_Reason, CH_R_CAST<void*>(&m_LoaderData->m_CustomTransmitted));
 			return;
 		}
 
@@ -322,13 +328,11 @@ namespace chdr
 		}
 
 		// Call EP of our module.
-		DllMain(m_TargetBase,
-			DLL_PROCESS_ATTACH,
-			CH_R_CAST<void*>(&m_LoaderData->m_CustomTransmitted));
+		DllMain(m_TargetBase, m_LoaderData->m_Reason, CH_R_CAST<void*>(&m_LoaderData->m_CustomTransmitted));
 	};
 
 	// Internal manual map function.
-	bool Process_t::ManualMapInject_Internal(std::uint8_t* m_ImageBuffer, std::size_t m_nImageSize, std::int32_t m_eInjectionFlags)
+	bool Process_t::ManualMapInject_Internal(std::uint8_t* m_ImageBuffer, std::int32_t m_eInjectionFlags)
 	{
 		// Grab DOS header.
 		const PIMAGE_DOS_HEADER m_pDosHeaders = CH_R_CAST<PIMAGE_DOS_HEADER>(m_ImageBuffer);
@@ -347,7 +351,7 @@ namespace chdr
 		}
 
 		// Address our module will be in context of target process.
-		const std::uintptr_t m_TargetBaseAddress = this->Allocate(m_pNTHeaders->OptionalHeader.SizeOfImage/*0x1000*/, PAGE_EXECUTE_READWRITE);
+		const std::uintptr_t m_TargetBaseAddress = this->Allocate(m_pNTHeaders->OptionalHeader.SizeOfImage, PAGE_EXECUTE_READWRITE, false);
 
 		// Copy over PE Header to target process.
 		if (!this->Write(m_TargetBaseAddress, m_ImageBuffer, m_pNTHeaders->OptionalHeader.SizeOfImage))
@@ -383,6 +387,7 @@ namespace chdr
 			CH_S_CAST<std::uint32_t>(m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress),
 			CH_S_CAST<std::uint32_t>(m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size),
 			CH_S_CAST<std::uint32_t>(m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress),
+			DLL_PROCESS_ATTACH,
 			m_CustomTransmittedData
 		};
 
@@ -409,7 +414,7 @@ namespace chdr
 		}
 
 		// Address our loader data will be in context of target process.
-		const std::uintptr_t m_LoaderDataAddress = this->Allocate(sizeof(LoaderData_t), PAGE_EXECUTE_READWRITE);
+		const std::uintptr_t m_LoaderDataAddress = this->Allocate(sizeof(LoaderData_t), PAGE_EXECUTE_READWRITE, false);
 
 		// Copy over loader data to target process.
 		if (!this->Write(m_LoaderDataAddress, &LoaderData, sizeof(LoaderData_t)))
@@ -426,7 +431,7 @@ namespace chdr
 			// Simply CreateRemoteThread in target process to execute our shellcode.
 		{
 			// Address our shellcode will be in context of target process.
-			const std::uintptr_t m_ShellcodeAddress = this->Allocate(4096, PAGE_EXECUTE_READWRITE);
+			const std::uintptr_t m_ShellcodeAddress = this->Allocate(4096, PAGE_EXECUTE_READWRITE, false);
 
 			// Copy over shellcode to target process.
 			if (!this->Write(m_ShellcodeAddress, Shellcode, 4096))
@@ -456,41 +461,31 @@ namespace chdr
 		(&m_FileImageBuffer)->assign((std::istreambuf_iterator<char>(m_fFile)), std::istreambuf_iterator<char>());
 		m_fFile.close();
 
-		std::uint8_t* m_ImageBuffer = m_FileImageBuffer.data();
-		const std::size_t m_nImageSize = m_FileImageBuffer.size();
-
-		if (!m_nImageSize)
+		if (!m_FileImageBuffer.size())
 		{
 			CH_LOG("Couldn't parse desired m_ImageBuffer to manual map.");
 			return false;
 		}
 
-		return ManualMapInject_Internal(m_ImageBuffer, m_nImageSize, m_eInjectionFlags);
+		return ManualMapInject_Internal(m_FileImageBuffer.data(), m_eInjectionFlags);
 	}
 
 	// Manual map injection from module in memory.
-	bool Process_t::ManualMapInject(std::uint8_t* m_ImageBuffer, std::size_t m_nImageSize, std::int32_t m_eInjectionFlags)
+	bool Process_t::ManualMapInject(std::uint8_t* m_ImageBuffer,  std::int32_t m_eInjectionFlags)
 	{
-		if (!m_nImageSize)
-		{
-			CH_LOG("Couldn't parse desired m_ImageBuffer to manual map.");
-			return false;
-		}
-
-		return ManualMapInject_Internal(m_ImageBuffer, m_nImageSize, m_eInjectionFlags);
+		return ManualMapInject_Internal(m_ImageBuffer, m_eInjectionFlags);
 	}
 
 	// Manual map injection from ImageFile_t.
 	bool Process_t::ManualMapInject(ImageFile_t& m_ImageFile, std::int32_t m_eInjectionFlags)
 	{
-		const std::size_t m_nImageSize = m_ImageFile.m_ImageBuffer.size();
-		if (!m_nImageSize)
+		if (!m_ImageFile.m_ImageBuffer.size())
 		{
 			CH_LOG("Couldn't parse desired ImageFile_t to manual map.");
 			return false;
 		}
 
-		return ManualMapInject_Internal(m_ImageFile.m_ImageBuffer.data(), m_nImageSize, m_eInjectionFlags);
+		return ManualMapInject_Internal(m_ImageFile.m_ImageBuffer.data(), m_eInjectionFlags);
 	}
 
 	// LoadLibrary injection from module on disk.
@@ -549,20 +544,17 @@ namespace chdr
 			if (!m_hThreadHandle || m_hThreadHandle == INVALID_HANDLE_VALUE)
 				continue;
 
+			chdr::misc::QueuedScopeHandler ScopedHandler(CloseHandle, m_hThreadHandle);
+
 			DWORD m_dThreadStartAddress = 0;
 			if (NtQueryInformationThread(m_hThreadHandle,
 				Thread_t::THREADINFOCLASS::ThreadQuerySetWin32StartAddress,
 				&m_dThreadStartAddress,
 				this->m_eProcessArchitecture == eProcessArchitecture::ARCHITECTURE_x64 ? sizeof(DWORD) * 2 : sizeof(DWORD),
 				nullptr) != 0x00000000/*STATUS_SUCCESS*/)
-			{
-				CloseHandle(m_hThreadHandle);
 				continue;
-			}
-
+			
 			const bool m_bIsThreadSuspended = WaitForSingleObject(m_hThreadHandle, 0) == WAIT_ABANDONED;
-
-			CloseHandle(m_hThreadHandle);
 
 			m_EnumeratedThreads.push_back(
 				{ mEntry.th32ThreadID,
@@ -629,12 +621,11 @@ namespace chdr
 		if (!OpenProcessToken(this->m_hTargetProcessHandle, TOKEN_ALL_ACCESS, &m_hToken))
 			return false;
 
+		chdr::misc::QueuedScopeHandler ScopedHandler(CloseHandle, m_hToken);
+
 		LUID m_LUID;
 		if (!LookupPrivilegeValue(NULL, L"SeDebugPrivilege", &m_LUID))
-		{
-			CloseHandle(m_hToken);
 			return false;
-		}
 
 		TOKEN_PRIVILEGES m_TokenPrivileges;
 		m_TokenPrivileges.PrivilegeCount = 1;
@@ -644,8 +635,6 @@ namespace chdr
 		const bool result =
 			AdjustTokenPrivileges(m_hToken, false, &m_TokenPrivileges, sizeof(m_TokenPrivileges), NULL, NULL)
 			&& GetLastError() != ERROR_NOT_ALL_ASSIGNED;
-
-		CloseHandle(m_hToken);
 
 		return result;
 	}
@@ -744,27 +733,23 @@ namespace chdr
 	}
 
 	// VirtualAllocEx implementation.
-	std::uintptr_t Process_t::Allocate(std::size_t m_AllocationSize, DWORD m_dProtectionType)
+	std::uintptr_t Process_t::Allocate(std::size_t m_AllocationSize, DWORD m_dProtectionType, bool  m_bShouldTrack)
 	{
-		const LPVOID m_AllocatedMemory = VirtualAllocEx(this->m_hTargetProcessHandle, nullptr, m_AllocationSize, MEM_COMMIT | MEM_RESERVE, m_dProtectionType);
-		if (!m_AllocatedMemory)
-		{
-			CH_LOG("Failed to allocate memory with error code #%i.", GetLastError());
-		}
+		const std::uintptr_t m_AllocatedMemory = CH_R_CAST<std::uintptr_t>(VirtualAllocEx(this->m_hTargetProcessHandle, nullptr, m_AllocationSize, MEM_COMMIT | MEM_RESERVE, m_dProtectionType));
+		if (m_AllocatedMemory && m_bShouldTrack)
+			this->m_AllocatedMemoryTracker.insert({ m_AllocatedMemory, m_AllocationSize });
 
-		return CH_R_CAST<std::uintptr_t>(m_AllocatedMemory);
+		return m_AllocatedMemory;
 	}
 
 	// VirtualFreeEx implementation.
-	BOOL Process_t::Free(LPVOID m_FreeAddress)
+	bool Process_t::Free(std::uintptr_t m_FreeAddress)
 	{
-		const BOOL m_bDidSucceed = VirtualFreeEx(this->m_hTargetProcessHandle, m_FreeAddress, NULL, MEM_RELEASE);
-		if (!m_bDidSucceed)
-		{
-			CH_LOG("Failed to free memory with error code #%i.", GetLastError());
-		}
+		const bool m_bDidFree = VirtualFreeEx(this->m_hTargetProcessHandle, (LPVOID)m_FreeAddress, NULL, MEM_RELEASE);
+		if (m_bDidFree)
+			this->m_AllocatedMemoryTracker.erase(this->m_AllocatedMemoryTracker.find(m_FreeAddress));
 
-		return m_bDidSucceed;
+		return m_bDidFree;
 	}
 
 	// VirtualQueryEx implementation.
@@ -1434,20 +1419,19 @@ namespace chdr
 		if (!m_hCreatedService || m_hCreatedService == INVALID_HANDLE_VALUE)
 		{
 			CH_LOG("Failed to create desired service!");
-			CloseServiceHandle(m_hServiceManager);
 			return CH_R_CAST<SC_HANDLE>(INVALID_HANDLE_VALUE);
 		}
 
+		chdr::misc::QueuedScopeHandler ScopedHandler(CloseServiceHandle, m_hServiceManager);
+
 		// Finally, start the service.
-		const BOOL m_bDidServiceStartSuccessfully = StartServiceA(m_hCreatedService, NULL, nullptr);
-		if (!m_bDidServiceStartSuccessfully)
+		if (!StartServiceA(m_hCreatedService, NULL, nullptr))
 		{
 			CH_LOG("Failed to start desired service!");
+			return CH_R_CAST<SC_HANDLE>(INVALID_HANDLE_VALUE);
 		}
-
+		
 		// Release unneeded handle.
-		CloseServiceHandle(m_hServiceManager);
-
 		return m_hCreatedService;
 	}
 
