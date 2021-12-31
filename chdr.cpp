@@ -74,9 +74,11 @@ namespace chdr
 		// Just to be safe, free all of our allocated memory from this process.
 		if (!this->m_AllocatedMemoryTracker.empty())
 		{
-			for (const auto& ForgottenMemory : this->m_AllocatedMemoryTracker) 
-				CH_LOG(this->Free(ForgottenMemory.first) ? "Successful free of memory at 0x%X with size 0x%X" :
-					"Couldn't free memory at 0x%X with size 0x%X", ForgottenMemory.first, ForgottenMemory.second);
+			for (const auto& ForgottenMemory : this->m_AllocatedMemoryTracker)
+				if (this->Free(ForgottenMemory.first)) // Has to be this ugly since I've included string enc in the log macros... :(
+					CH_LOG("Successful free of memory at 0x%X with size 0x%X", ForgottenMemory.first, ForgottenMemory.second)
+				else
+					CH_LOG("Couldn't free memory at 0x%X with size 0x%X", ForgottenMemory.first, ForgottenMemory.second);
 		}
 
 		// Not allowed to release this HANDLE, or was already released.
@@ -198,18 +200,15 @@ namespace chdr
 	// Is the target process suspended?
 	bool Process_t::IsSuspended()
 	{
-		bool m_bIsProcessSuspended = true;
-
 		// Traverse all threads, and ensure each is in a suspended state.
 		for (const auto& CurrentThread : this->EnumerateThreads())
 		{
 			if (CurrentThread.m_bIsThreadSuspended)
 				continue;
 
-			m_bIsProcessSuspended = false; // Found a thread that's still alive, cache and exit loop.
-			break;
+			return false;
 		}
-		return m_bIsProcessSuspended;
+		return true;
 	}
 
 	// Is the target process running under a debugger?
@@ -248,8 +247,8 @@ namespace chdr
 
 	// Data to pass through our shellcode.
 	struct LoaderData_t {
-		std::uintptr_t m_ModuleBase = 0u, m_ImageBase = 0u, m_EntryPoint = 0u, m_LoadLibrary = 0u, m_GetProcAddress = 0u;
-		std::uint32_t  m_RelocDirVA = 0u, m_RelocDirSize = 0u, m_ImportDirVA = 0u, m_Reason = 0u;
+		std::uintptr_t m_ModuleBase = 0u, m_ImageBase = 0u, m_EntryPoint = 0u, m_LoadLibrary = 0u, m_GetProcAddress = 0u, m_Memset = 0u;
+		std::uint32_t  m_RelocDirVA = 0u, m_RelocDirSize = 0u, m_ImportDirVA = 0u, m_PEHeaderSize = 0u, m_eInjectionFlags = 0u, m_Reason = 0u;
 		TransmittedData_t m_CustomTransmitted = {};
 	} LoaderData;
 
@@ -318,17 +317,26 @@ namespace chdr
 			for (; *m_pNameReference; ++m_pNameReference, ++m_pThunk)
 			{
 				if (IMAGE_SNAP_BY_ORDINAL(*m_pNameReference))
-					*(FARPROC*)m_pThunk = _GetProcAddress(m_hImportModule, CH_R_CAST<char*>(*m_pNameReference & 0xFFFF));
+					*CH_R_CAST<FARPROC*>(m_pThunk) = _GetProcAddress(m_hImportModule, CH_R_CAST<char*>(*m_pNameReference & 0xFFFF));
 				else
 				{
-					PIMAGE_IMPORT_BY_NAME m_pThunkData = CH_R_CAST<PIMAGE_IMPORT_BY_NAME>(m_TargetBase + (*m_pNameReference));
-					*(FARPROC*)m_pThunk = _GetProcAddress(m_hImportModule, m_pThunkData->Name);
+					PIMAGE_IMPORT_BY_NAME m_pThunkData = CH_R_CAST<PIMAGE_IMPORT_BY_NAME>(m_TargetBase + *m_pNameReference);
+					*CH_R_CAST<FARPROC*>(m_pThunk) = _GetProcAddress(m_hImportModule, m_pThunkData->Name);
 				}
 			}
 		}
 
 		// Call EP of our module.
 		DllMain(m_TargetBase, m_LoaderData->m_Reason, CH_R_CAST<void*>(&m_LoaderData->m_CustomTransmitted));
+
+		typedef void*(__stdcall* memset_fn)(std::uintptr_t, std::int32_t, std::size_t);
+		memset_fn _memset = CH_R_CAST<memset_fn>(m_LoaderData->m_Memset);
+
+		if (m_LoaderData->m_eInjectionFlags & Process_t::eManualMapInjectionFlags::INJECTION_EXTRA_WIPEPEHEADERS)
+			_memset(m_TargetBase, NULL, m_LoaderData->m_PEHeaderSize);
+
+		if (m_LoaderData->m_eInjectionFlags & Process_t::eManualMapInjectionFlags::INJECTION_EXTRA_WIPEENTRYPOINT)
+			_memset(m_TargetBase + m_LoaderData->m_EntryPoint, NULL, 0x20u);
 	};
 
 	// Internal manual map function.
@@ -384,12 +392,18 @@ namespace chdr
 			CH_S_CAST<std::uintptr_t>(m_pNTHeaders->OptionalHeader.AddressOfEntryPoint),
 			CH_R_CAST<std::uintptr_t>(LoadLibraryA),
 			CH_R_CAST<std::uintptr_t>(GetProcAddress),
+			CH_R_CAST<std::uintptr_t>(std::memset),
 			CH_S_CAST<std::uint32_t>(m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress),
 			CH_S_CAST<std::uint32_t>(m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size),
 			CH_S_CAST<std::uint32_t>(m_pNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress),
+			CH_S_CAST<std::uint32_t>(m_pNTHeaders->OptionalHeader.SizeOfHeaders),
+			CH_S_CAST<std::uint32_t>(m_eInjectionFlags),
 			DLL_PROCESS_ATTACH,
-			m_CustomTransmittedData
+			NULL
 		};
+
+		if (m_eInjectionFlags & eManualMapInjectionFlags::INJECTION_EXTRA_CUSTOMARGUMENTS)
+			LoaderData.m_CustomTransmitted = m_CustomTransmittedData;
 
 		// Fix up data if we've built with mismatched architecture.
 		if (m_pNTHeaders->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC)
@@ -544,7 +558,7 @@ namespace chdr
 			if (!m_hThreadHandle || m_hThreadHandle == INVALID_HANDLE_VALUE)
 				continue;
 
-			chdr::misc::QueuedScopeHandler ScopedHandler(CloseHandle, m_hThreadHandle);
+			ADD_SCOPE_HANDLER(CloseHandle, m_hThreadHandle);
 
 			DWORD m_dThreadStartAddress = 0;
 			if (NtQueryInformationThread(m_hThreadHandle,
@@ -621,7 +635,7 @@ namespace chdr
 		if (!OpenProcessToken(this->m_hTargetProcessHandle, TOKEN_ALL_ACCESS, &m_hToken))
 			return false;
 
-		chdr::misc::QueuedScopeHandler ScopedHandler(CloseHandle, m_hToken);
+		ADD_SCOPE_HANDLER(CloseHandle, m_hToken);
 
 		LUID m_LUID;
 		if (!LookupPrivilegeValue(NULL, L"SeDebugPrivilege", &m_LUID))
@@ -685,11 +699,7 @@ namespace chdr
 	T Process_t::Read(std::uintptr_t m_ReadAddress)
 	{
 		T m_pOutputRead;
-		if (!ReadProcessMemory(this->m_hTargetProcessHandle, (LPCVOID)m_ReadAddress, &m_pOutputRead, sizeof(T), NULL))
-		{
-			CH_LOG("Failed to read memory at addr 0x%X, with error code #%i.", m_ReadAddress, GetLastError());
-		}
-
+		ReadProcessMemory(this->m_hTargetProcessHandle, (LPCVOID)m_ReadAddress, &m_pOutputRead, sizeof(T), NULL);
 		return m_pOutputRead;
 	}
 
@@ -698,11 +708,7 @@ namespace chdr
 	std::size_t Process_t::Read(std::uintptr_t m_ReadAddress, S m_pBuffer, std::size_t m_nBufferSize)
 	{
 		SIZE_T m_nBytesRead = 0u;
-		if (!ReadProcessMemory(this->m_hTargetProcessHandle, (LPCVOID)m_ReadAddress, m_pBuffer, m_nBufferSize, &m_nBytesRead))
-		{
-			CH_LOG("Failed to read memory at addr 0x%X, with error code #%d.", m_ReadAddress, GetLastError());
-			m_nBytesRead = 0u;
-		}
+		ReadProcessMemory(this->m_hTargetProcessHandle, (LPCVOID)m_ReadAddress, m_pBuffer, m_nBufferSize, &m_nBytesRead);
 		return m_nBytesRead;
 	}
 
@@ -711,11 +717,7 @@ namespace chdr
 	std::size_t Process_t::Write(std::uintptr_t m_WriteAddress, S m_WriteValue)
 	{
 		SIZE_T lpNumberOfBytesWritten = NULL; // Fuck you MSVC.
-		if (!WriteProcessMemory(this->m_hTargetProcessHandle, (LPVOID)m_WriteAddress, (LPCVOID)m_WriteValue, sizeof(S), &lpNumberOfBytesWritten))
-		{
-			CH_LOG("Failed to write memory at addr 0x%X, with error code #%d.", m_WriteAddress, GetLastError());
-		}
-
+		WriteProcessMemory(this->m_hTargetProcessHandle, (LPVOID)m_WriteAddress, (LPCVOID)m_WriteValue, sizeof(S), &lpNumberOfBytesWritten);
 		return lpNumberOfBytesWritten;
 	}
 
@@ -724,11 +726,7 @@ namespace chdr
 	std::size_t Process_t::Write(std::uintptr_t m_WriteAddress, S m_WriteValue, std::size_t m_WriteSize)
 	{
 		SIZE_T lpNumberOfBytesWritten = NULL; // Fuck you MSVC.
-		if (!WriteProcessMemory(this->m_hTargetProcessHandle, (LPVOID)m_WriteAddress, (LPCVOID)m_WriteValue, m_WriteSize, &lpNumberOfBytesWritten))
-		{
-			CH_LOG("Failed to write memory at addr 0x%X, with error code #%d.", m_WriteAddress, GetLastError());
-		}
-
+		WriteProcessMemory(this->m_hTargetProcessHandle, (LPVOID)m_WriteAddress, (LPCVOID)m_WriteValue, m_WriteSize, &lpNumberOfBytesWritten);
 		return lpNumberOfBytesWritten;
 	}
 
@@ -746,7 +744,7 @@ namespace chdr
 	bool Process_t::Free(std::uintptr_t m_FreeAddress)
 	{
 		const bool m_bDidFree = VirtualFreeEx(this->m_hTargetProcessHandle, (LPVOID)m_FreeAddress, NULL, MEM_RELEASE);
-		if (m_bDidFree)
+		if (m_bDidFree && this->m_AllocatedMemoryTracker.find(m_FreeAddress) != this->m_AllocatedMemoryTracker.end())
 			this->m_AllocatedMemoryTracker.erase(this->m_AllocatedMemoryTracker.find(m_FreeAddress));
 
 		return m_bDidFree;
@@ -773,9 +771,11 @@ namespace chdr
 		if (!m_hRemoteThread || m_hRemoteThread == INVALID_HANDLE_VALUE)
 			return 0;
 
-		// TODO: Good idea to wait for thread to ensure response?
+		ADD_SCOPE_HANDLER(CloseHandle, m_hRemoteThread);
 
-		CloseHandle(m_hRemoteThread);
+		if (WaitForSingleObject(m_hRemoteThread, INFINITE) == WAIT_FAILED)
+			return -1;
+
 		return 1;
 	}
 }
@@ -938,10 +938,7 @@ namespace chdr
 				// Read module name.
 				char* m_szModuleName = CH_R_CAST<char*>(m_ImageBuffer + this->RvaToOffset(m_pImportDescriptor->Name));
 
-				std::uint32_t m_nThunkOffset = m_pImportDescriptor->OriginalFirstThunk ?
-					m_pImportDescriptor->OriginalFirstThunk : m_pImportDescriptor->FirstThunk;
-
-				PIMAGE_THUNK_DATA m_pThunkData = CH_R_CAST<PIMAGE_THUNK_DATA>(m_ImageBuffer + this->RvaToOffset(m_nThunkOffset));
+				PIMAGE_THUNK_DATA m_pThunkData = CH_R_CAST<PIMAGE_THUNK_DATA>(m_ImageBuffer + this->RvaToOffset(m_pImportDescriptor->OriginalFirstThunk));
 
 				for (; m_pThunkData->u1.AddressOfData; ++m_pThunkData)
 				{
@@ -1149,10 +1146,7 @@ namespace chdr
 
 				m_szModuleName[MAX_PATH - 1] = '\0';
 
-				std::size_t m_nThunkOffset = m_pImportDescriptor.OriginalFirstThunk ?
-					m_pImportDescriptor.OriginalFirstThunk : m_pImportDescriptor.FirstThunk;
-
-				for (std::size_t n = m_nThunkOffset; ; n += sizeof(IMAGE_THUNK_DATA32))
+				for (std::size_t n = m_pImportDescriptor.OriginalFirstThunk; ; n += sizeof(IMAGE_THUNK_DATA32))
 				{
 					IMAGE_THUNK_DATA m_pThunkData = m_Process.Read<IMAGE_THUNK_DATA>(m_BaseAddress + n);
 					if (!m_pThunkData.u1.AddressOfData)
@@ -1422,7 +1416,7 @@ namespace chdr
 			return CH_R_CAST<SC_HANDLE>(INVALID_HANDLE_VALUE);
 		}
 
-		chdr::misc::QueuedScopeHandler ScopedHandler(CloseServiceHandle, m_hServiceManager);
+		ADD_SCOPE_HANDLER(CloseServiceHandle, m_hServiceManager);
 
 		// Finally, start the service.
 		if (!StartServiceA(m_hCreatedService, NULL, nullptr))

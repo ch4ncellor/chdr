@@ -21,7 +21,7 @@ namespace chdr
 
 #ifdef SHOULD_PRINT_DEBUG_LOGS
 	// Custom debug assert/log.
-#define CH_LOG(s, ...) { std::printf("[!] "); std::printf(s, __VA_ARGS__); std::printf("\n"); }
+#define CH_LOG(s, ...) { std::printf("[!] "); std::printf(XOR(s), __VA_ARGS__); std::printf("\n"); }
 #define CH_ASSERT(x, b, s, ...) if (!(b)) {  CH_LOG(s, __VA_ARGS__) if constexpr (x) return;  }
 #else
 	// Custom debug assert/log.
@@ -349,8 +349,10 @@ namespace chdr
 			INJECTION_NONE = (0 << 0),
 			INJECTION_MODE_THREADHIJACK = (1 << 1),
 			INJECTION_MODE_CREATEREMOTETHREAD = (1 << 2),
-			INJECTION_EXTRA_WIPEPEHEADERS = (1 << 3),
-			INJECTION_EXTRA_WIPEGARBAGESECTIONS = (1 << 4),
+			INJECTION_EXTRA_CUSTOMARGUMENTS = (1 << 3),
+			INJECTION_EXTRA_WIPEPEHEADERS = (1 << 4),
+			INJECTION_EXTRA_WIPEENTRYPOINT = (1 << 5),
+			INJECTION_EXTRA_WIPEGARBAGESECTIONS = (1 << 6),
 			INJECTION_MAXIMUM = INJECTION_EXTRA_WIPEGARBAGESECTIONS + 1
 		};
 
@@ -635,6 +637,33 @@ namespace chdr
 
 	namespace misc
 	{
+#define XOR(str) []() { constexpr auto s = chdr::misc::StringEncryption<sizeof(str) / sizeof(str[0])>(str); return s.GetDecrypted(); }()
+#define COMPILETIME_SEED (__TIME__[3] - '0') * 10 + (__TIME__[4] - '0') // Temp, make this more unique lmfao.
+		 
+		template <std::size_t nStringSize>
+		class StringEncryption 
+		{
+			char m_EncryptedData[nStringSize] = { 0 };
+		public:
+			constexpr StringEncryption(const char* m_szToEncrypt) {
+				for (std::size_t i = 0u; i < nStringSize; i++)
+					m_EncryptedData[i] = m_szToEncrypt[i] ^ COMPILETIME_SEED;
+			}
+
+			const char* GetDecrypted() const {
+				static char m_DecryptedData[nStringSize];
+				m_DecryptedData[0] = m_EncryptedData[0] ^ COMPILETIME_SEED;
+
+				for (std::size_t i = 1u; m_DecryptedData[i - 1u]; ++i)
+					m_DecryptedData[i] = m_EncryptedData[i] ^ COMPILETIME_SEED;
+
+				return m_DecryptedData;
+			}
+		};
+
+#define ADD_SCOPE_HANDLER(a, b) chdr::misc::QueuedScopeHandler ScopeHandler(a, b);
+#define PUSH_SCOPE_HANDLER(a, b) ScopeHandler.AddToTail(a, b);
+
 		// This is fine for now, but because the template is class-specific, you can't currently queue more than one type.
 		template <typename Callback, typename... Parameters>
 		class QueuedScopeHandler
