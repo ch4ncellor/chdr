@@ -634,6 +634,80 @@ namespace chdr
 		std::int32_t _CreateRemoteThread(LPVOID m_lpStartAddress, LPVOID m_lpParameter);
 	};
 
+	namespace math
+	{
+		class Color
+		{
+		public:
+			float r = 0.0f;
+			float g = 0.0f;
+			float b = 0.0f;
+			float a = 255.0f;
+		public:
+			Color() : r{}, g{}, b{}, a{} { }
+			Color(float _r, float _g, float _b, float _a) : r{ _r }, g{ _g }, b{ _b }, a{ _a } { }
+
+			bool operator==(const Color& v) const { return v.r == this->r && v.g == this->g && v.b == this->b && v.a == this->a; }
+			bool operator!=(const Color& v) const { return v.r != this->r || v.g != this->g || v.b != this->b || v.a != this->a; }
+
+			void Reset(float _r = 0.0f, float _g = 0.0f, float _b = 0.0f, float _a = 0.0f) { this->r = _r; this->g = _g; this->b = _b; this->a = _a; }
+		};
+
+		class Vector2D
+		{
+		public:
+			int x = 0;
+			int y = 0;
+		public:
+			Vector2D() : x{}, y{} { }
+			Vector2D(int _x, int _y) : x{ _x }, y{ _y } { }
+
+			bool operator==(const Vector2D& v) const { return v.x == this->x && v.y == this->y; }
+			bool operator!=(const Vector2D& v) const { return v.x != this->x || v.y != this->y; }
+
+			// TODO: more arithmetic operators, too lazy to type it all out rn.
+			Vector2D operator-(const Vector2D& v) const { return { this->x - v.x, this->y - v.y}; }
+			Vector2D operator+(const Vector2D& v) const { return { this->x + v.x, this->y + v.y }; }
+			Vector2D operator-=(const Vector2D& v) { return { this->x -= v.x, this->y -= v.y }; }
+			Vector2D operator+=(const Vector2D& v) { return { this->x += v.x, this->y += v.y }; }
+			Vector2D operator/=(const Vector2D& v) { return { this->x /= v.x, this->y /= v.y }; }
+			Vector2D operator*=(const Vector2D& v) { return { this->x *= v.x, this->y *= v.y }; }
+
+			void Reset(int _x = 0, int _y = 0) { this->x = _x; this->y = _y; }
+		};
+		
+		class Vector3D
+		{
+		public:
+			float x = 0.0f;
+			float y = 0.0f;
+			float z = 0.0f;
+		public:
+			Vector3D() : x{}, y{}, z{} { }
+			Vector3D(float _x, float _y, float _z) : x{ _x }, y{ _y }, z{ _z } { }
+
+			bool operator==(const Vector3D& v) const { return v.x == this->x && v.y == this->y && v.z == this->z; }
+			bool operator!=(const Vector3D& v) const { return v.x != this->x || v.y != this->y || v.z != this->z; }
+
+			// TODO: more arithmetic operators, too lazy to type it all out rn.
+			Vector3D operator-(const Vector3D& v) const { return { this->x - v.x, this->y - v.y, this->z - v.z }; }
+			Vector3D operator+(const Vector3D& v) const { return { this->x + v.x, this->y + v.y,  this->z + v.z }; }
+			Vector3D operator-=(const Vector3D& v) { return { this->x -= v.x, this->y -= v.y, this->z -= v.z }; }
+			Vector3D operator+=(const Vector3D& v) { return { this->x += v.x, this->y += v.y, this->z += v.z }; }
+			Vector3D operator/=(const Vector3D& v) { return { this->x /= v.x, this->y /= v.y, this->z /= v.z  }; }
+			Vector3D operator*=(const Vector3D& v) { return { this->x *= v.x, this->y *= v.y, this->z *= v.z }; }
+
+			bool IsValid() const { return this->x != 0.0f && this->y != 0.0f && this->z != 0.0f; }
+			void Reset(float _x = 0.0f, float _y = 0.0f, float _z = 0.0f) { this->x = _x; this->y = _y; this->z = _z; }
+
+			float Length() const { return std::sqrtf(this->LengthSqr()); }
+			float LengthSqr() const { return (this->x * this->x) + (this->y * this->y) + (this->z * this->z);  }
+			float Length2DSqr() const { return (this->x * this->x) + (this->y * this->y); }
+			float Length2D() const { return std::sqrtf(this->x * this->x + this->y * this->y); }
+			float Distance(const Vector3D& v) const { Vector3D m_vecDelta = { this->x - v.x, this->y - v.y, this->z - v.z }; return m_vecDelta.Length2D();  }
+		};
+	}
+
 
 	namespace misc
 	{

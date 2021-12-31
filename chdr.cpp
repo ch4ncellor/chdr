@@ -955,7 +955,7 @@ namespace chdr
 			}
 		}
 	}
-
+	 
 	// Parsing data out of this image's process.
 	PEHeaderData_t::PEHeaderData_t(Process_t& m_Process, std::int32_t m_ParseType, std::uintptr_t m_CustomBaseAddress)
 	{
