@@ -78,7 +78,8 @@ namespace chdr
 		};
 
 		// Only for PDB7.0 format!
-		struct CV_INFO_PDB70 {
+		struct CV_INFO_PDB70 
+		{
 			DWORD	CvSignature;
 			GUID	Signature;
 			DWORD	Age;
@@ -711,8 +712,8 @@ namespace chdr
 
 	namespace misc
 	{
-#define XOR(str) []() { constexpr auto s = chdr::misc::StringEncryption<sizeof(str) / sizeof(str[0])>(str); return s.GetDecrypted(); }()
-#define COMPILETIME_SEED (__TIME__[3] - '0') * 10 + (__TIME__[4] - '0') // Temp, make this more unique lmfao.
+#define XOR(str) []() { constexpr auto s = chdr::misc::StringEncryption<sizeof(str) / sizeof(str[0])>(str); return s.Decrypted(); }()
+		constexpr auto COMPILETIME_SEED = (__TIME__[3] - '0') * 10 + (__TIME__[4] - '0'); // Temp, make this more unique lmfao.
 		 
 		template <std::size_t nStringSize>
 		class StringEncryption 
@@ -724,7 +725,7 @@ namespace chdr
 					m_EncryptedData[i] = m_szToEncrypt[i] ^ COMPILETIME_SEED;
 			}
 
-			const char* GetDecrypted() const {
+			const char* Decrypted() const {
 				static char m_DecryptedData[nStringSize];
 				m_DecryptedData[0] = m_EncryptedData[0] ^ COMPILETIME_SEED;
 
@@ -734,6 +735,23 @@ namespace chdr
 				return m_DecryptedData;
 			}
 		};
+
+		// No clever macros for you :(
+
+#pragma  optimize( "", off )
+		template <class T>
+		class PointerEncryption
+		{
+			std::uintptr_t m_EncryptedPtrData = 0u;
+		public:
+			 PointerEncryption(T* m_pToEncrypt) {
+				m_EncryptedPtrData = CH_R_CAST<std::uintptr_t>(m_pToEncrypt) ^ (COMPILETIME_SEED * 0xB00B);
+			}
+			
+			 bool IsValid() const { return (m_EncryptedPtrData ^ (COMPILETIME_SEED * 0xB00B)) != NULL; }
+			__forceinline T* Decrypted() const { return CH_R_CAST<T*>(m_EncryptedPtrData ^ (COMPILETIME_SEED * 0xB00B));}
+		};
+#pragma  optimize( "", on )
 
 #define ADD_SCOPE_HANDLER(a, b) chdr::misc::QueuedScopeHandler ScopeHandler(a, b);
 #define PUSH_SCOPE_HANDLER(a, b) ScopeHandler.AddToTail(a, b);
