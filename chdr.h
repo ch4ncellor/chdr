@@ -736,7 +736,7 @@ namespace chdr
 			}
 		};
 
-		// No clever macros for you :(
+#define CREATE_XORED_POINTER(type, ptr) chdr::misc::PointerEncryption<type>(ptr);
 
 #pragma  optimize( "", off )
 		template <class T>
