@@ -731,7 +731,7 @@ namespace chdr
 	}
 
 	// VirtualAllocEx implementation.
-	std::uintptr_t Process_t::Allocate(std::size_t m_AllocationSize, DWORD m_dProtectionType, bool  m_bShouldTrack)
+	std::uintptr_t Process_t::Allocate(std::size_t m_AllocationSize, DWORD m_dProtectionType, bool m_bShouldTrack)
 	{
 		const std::uintptr_t m_AllocatedMemory = CH_R_CAST<std::uintptr_t>(VirtualAllocEx(this->m_hTargetProcessHandle, nullptr, m_AllocationSize, MEM_COMMIT | MEM_RESERVE, m_dProtectionType));
 		if (m_AllocatedMemory && m_bShouldTrack)

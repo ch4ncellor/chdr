@@ -709,28 +709,29 @@ namespace chdr
 		};
 	}
 
-
 	namespace misc
 	{
 #define XOR(str) []() { constexpr auto s = chdr::misc::StringEncryption<sizeof(str) / sizeof(str[0])>(str); return s.Decrypted(); }()
-		constexpr auto COMPILETIME_SEED = (__TIME__[3] - '0') * 10 + (__TIME__[4] - '0'); // Temp, make this more unique lmfao.
+		constexpr std::size_t COMPILETIME_SEED = (__TIME__[3] - '0') * 10 + (__TIME__[4] - '0'); // Temp, make this more unique lmfao.
 		 
 		template <std::size_t nStringSize>
 		class StringEncryption 
-		{
-			char m_EncryptedData[nStringSize] = { 0 };
+		{ 
+			std::int8_t m_Xored[nStringSize][2] = { 0 };
 		public:
 			constexpr StringEncryption(const char* m_szToEncrypt) {
-				for (std::size_t i = 0u; i < nStringSize; i++)
-					m_EncryptedData[i] = m_szToEncrypt[i] ^ COMPILETIME_SEED;
+				for (std::size_t i = 0u; i < nStringSize; i++) {
+					this->m_Xored[i][0] = CH_S_CAST<std::int8_t>(COMPILETIME_SEED * i);
+					this->m_Xored[i][1] = m_szToEncrypt[i] ^ this->m_Xored[i][0];
+				}
 			}
 
 			const char* Decrypted() const {
 				static char m_DecryptedData[nStringSize];
-				m_DecryptedData[0] = m_EncryptedData[0] ^ COMPILETIME_SEED;
+				m_DecryptedData[0] = this->m_Xored[0][1];
 
-				for (std::size_t i = 1u; m_DecryptedData[i - 1u]; ++i)
-					m_DecryptedData[i] = m_EncryptedData[i] ^ COMPILETIME_SEED;
+				for (std::size_t i = 1u; m_DecryptedData[i - 1u]; ++i) 
+					m_DecryptedData[i] = this->m_Xored[i][1] ^ this->m_Xored[i][0];
 
 				return m_DecryptedData;
 			}
@@ -738,20 +739,22 @@ namespace chdr
 
 #define CREATE_XORED_POINTER(type, ptr) chdr::misc::PointerEncryption<type>(ptr);
 
-#pragma  optimize( "", off )
+#pragma optimize( "", off )
 		template <class T>
 		class PointerEncryption
 		{
-			std::uintptr_t m_EncryptedPtrData = 0u;
+			std::uintptr_t m_Xored[2] = { 0 };
 		public:
-			 PointerEncryption(T* m_pToEncrypt) {
-				m_EncryptedPtrData = CH_R_CAST<std::uintptr_t>(m_pToEncrypt) ^ (COMPILETIME_SEED * 0xB00B);
+			PointerEncryption(T* m_pToEncrypt) {
+				this->m_Xored[0] = CH_R_CAST<std::uintptr_t>(m_pToEncrypt) ^ CH_R_CAST<std::uintptr_t>(m_pToEncrypt);
+				this->m_Xored[1] = this->m_Xored[0] ^ (CH_R_CAST<std::uintptr_t>(m_pToEncrypt) + (COMPILETIME_SEED * 0xB00B1E));
 			}
-			
-			 bool IsValid() const { return (m_EncryptedPtrData ^ (COMPILETIME_SEED * 0xB00B)) != NULL; }
-			__forceinline T* Decrypted() const { return CH_R_CAST<T*>(m_EncryptedPtrData ^ (COMPILETIME_SEED * 0xB00B));}
+
+			__forceinline T* operator->() { return this->Decrypted(); }
+			__forceinline bool IsValid() const { return CH_R_CAST<std::uintptr_t>(this->Decrypted()) != NULL; }
+			__forceinline T* Decrypted() const { return CH_R_CAST<T*>((this->m_Xored[0] ^ this->m_Xored[1]) - (COMPILETIME_SEED * 0xB00B1E)); }
 		};
-#pragma  optimize( "", on )
+#pragma optimize( "", on )
 
 #define ADD_SCOPE_HANDLER(a, b) chdr::misc::QueuedScopeHandler ScopeHandler(a, b);
 #define PUSH_SCOPE_HANDLER(a, b) ScopeHandler.AddToTail(a, b);
