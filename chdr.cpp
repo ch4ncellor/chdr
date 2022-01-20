@@ -1700,7 +1700,7 @@ namespace chdr
 				return CH_R_CAST<uintptr_t>(&m_ModuleData[i]);
 		}
 
-		CH_ASSERT(false, false, "Couldn't find IDA signature %s.", m_szSignature.data());
+		CH_LOG("Couldn't find IDA signature %s.", m_szSignature.data());
 		return uintptr_t();
 	}
 }
