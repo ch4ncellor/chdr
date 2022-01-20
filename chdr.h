@@ -528,6 +528,9 @@ namespace chdr
 		// Track allocated memory (removed on ::VirtualFreeEx calls).
 		std::map<std::uintptr_t, std::size_t> m_AllocatedMemoryTracker;
 
+		// Keep track of modules already initialized.
+		std::unordered_map<const char*, Module_t> m_AllocatedModules;
+
 		bool m_bHasCachedProcessesModules = false;
 
 		// Get architecture of target process. 
