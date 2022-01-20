@@ -782,7 +782,8 @@ namespace chdr
 	// GetModule implementation.
 	Module_t& Process_t::GetModule(const char* m_szModuleName, std::int32_t m_ParseType)
 	{
-		CH_ASSERT(false, IsValid(), "Invalid process called GetModule.");
+		if (!IsValid())
+			CH_LOG("Invalid process called GetModule : %s", m_szProcessName);
 
 		if (m_AllocatedModules.count(m_szModuleName) > 0u)
 			return m_AllocatedModules[m_szModuleName];
@@ -1675,7 +1676,7 @@ namespace chdr
 		};
 
 		if (!m_dModuleSize || !IsValid()) {
-			CH_ASSERT(false, false, "Invalid module provided.");
+			CH_LOG("Invalid module provided.");
 			return uintptr_t();
 		}
 
