@@ -778,6 +778,21 @@ namespace chdr
 
 		return 1;
 	}
+
+	// GetModule implementation.
+	Module_t& Process_t::GetModule(const char* m_szModuleName, std::int32_t m_ParseType)
+	{
+		if (!IsValid())
+			CH_LOG("Invalid process called GetModule : %s", m_szProcessName);
+
+		if (m_AllocatedModules.count(m_szModuleName) > 0u)
+			return m_AllocatedModules[m_szModuleName];
+
+		Module_t m_Module(*this, m_szModuleName, m_ParseType);
+		m_AllocatedModules[m_szModuleName] = m_Module;
+
+		return m_AllocatedModules[m_szModuleName];
+	}
 }
 
 // PEHeaderData_t definitions and functions.
@@ -1637,12 +1652,62 @@ namespace chdr
 	{
 		return this->m_ModuleData.size() != 0;
 	}
+
+	std::uintptr_t Module_t::FindIDASignature(std::string_view m_szSignature)
+	{
+		static auto ToBytes = [](std::string_view m_szSignature) {
+			std::vector<int> byteArray = {};
+			const auto m_pStart = CH_C_CAST<char*>(m_szSignature.data());
+			const auto m_pEnd = m_pStart + m_szSignature.length();
+
+			for (char* m_pCurrent = m_pStart; m_pCurrent < m_pEnd; ++m_pCurrent) {
+				if (*m_pCurrent == '?') {
+					++m_pCurrent;
+
+					if (*m_pCurrent == '?')
+						++m_pCurrent;
+
+					byteArray.push_back(-1);
+				}
+				else
+					byteArray.push_back(strtoul(m_pCurrent, &m_pCurrent, 16));
+			}
+			return byteArray;
+		};
+
+		if (!m_dModuleSize || !IsValid()) {
+			CH_LOG("Invalid module provided.");
+			return uintptr_t();
+		}
+
+		// can't be ByteArray_t type because of wildcards.
+		const auto m_byteArray = ToBytes(m_szSignature);
+		const std::size_t nSize = m_byteArray.size();
+		const int* pBytes = m_byteArray.data();
+
+		// Find matching sequences.
+		for (std::size_t i = 0u; i < m_dModuleSize - nSize; ++i) {
+			bool bFound = true;
+
+			for (std::size_t j = 0u; j < nSize; ++j) {
+				if (pBytes[j] != -1 && m_ModuleData[i + j] != pBytes[j]) {
+					bFound = false;
+					break;
+				}
+			}
+
+			if (bFound)
+				return CH_R_CAST<uintptr_t>(&m_ModuleData[i]);
+		}
+
+		CH_LOG("Couldn't find IDA signature %s.", m_szSignature.data());
+		return uintptr_t();
+	}
 }
 
 // Miscelleanous functions.
 namespace chdr
 {
-
 	namespace misc
 	{
 

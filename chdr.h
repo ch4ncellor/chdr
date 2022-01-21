@@ -245,6 +245,9 @@ namespace chdr
 
 		// Ensure we found the target module in memory.
 		bool IsValid();
+
+		// Helper function to find some bytes in the module data.
+		std::uintptr_t FindIDASignature(std::string_view m_szSignature);
 	};
 
 	class Thread_t
@@ -525,6 +528,9 @@ namespace chdr
 		// Track allocated memory (removed on ::VirtualFreeEx calls).
 		std::map<std::uintptr_t, std::size_t> m_AllocatedMemoryTracker;
 
+		// Keep track of modules already initialized.
+		std::unordered_map<const char*, Module_t> m_AllocatedModules;
+
 		bool m_bHasCachedProcessesModules = false;
 
 		// Get architecture of target process. 
@@ -633,6 +639,9 @@ namespace chdr
 
 		// _CreateRemoteThread implementation.
 		std::int32_t _CreateRemoteThread(LPVOID m_lpStartAddress, LPVOID m_lpParameter);
+
+		// GetModule implementation.
+		Module_t& GetModule(const char* m_szModuleName, std::int32_t m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL);
 	};
 
 	namespace math
