@@ -693,43 +693,6 @@ namespace chdr
 		return ExportData[m_szExportName].m_nAddress;
 	}
 
-
-	// ReadProcessMemory implementation.
-	template <class T>
-	T Process_t::Read(std::uintptr_t m_ReadAddress)
-	{
-		T m_pOutputRead;
-		ReadProcessMemory(this->m_hTargetProcessHandle, (LPCVOID)m_ReadAddress, &m_pOutputRead, sizeof(T), NULL);
-		return m_pOutputRead;
-	}
-
-	// ReadProcessMemory implementation - allows byte arrays.
-	template <typename S>
-	std::size_t Process_t::Read(std::uintptr_t m_ReadAddress, S m_pBuffer, std::size_t m_nBufferSize)
-	{
-		SIZE_T m_nBytesRead = 0u;
-		ReadProcessMemory(this->m_hTargetProcessHandle, (LPCVOID)m_ReadAddress, m_pBuffer, m_nBufferSize, &m_nBytesRead);
-		return m_nBytesRead;
-	}
-
-	// WriteProcessMemory implementation.
-	template<typename S>
-	std::size_t Process_t::Write(std::uintptr_t m_WriteAddress, S m_WriteValue)
-	{
-		SIZE_T lpNumberOfBytesWritten = NULL; // Fuck you MSVC.
-		WriteProcessMemory(this->m_hTargetProcessHandle, (LPVOID)m_WriteAddress, (LPCVOID)m_WriteValue, sizeof(S), &lpNumberOfBytesWritten);
-		return lpNumberOfBytesWritten;
-	}
-
-	// WriteProcessMemory implementation.
-	template<typename S>
-	std::size_t Process_t::Write(std::uintptr_t m_WriteAddress, S m_WriteValue, std::size_t m_WriteSize)
-	{
-		SIZE_T lpNumberOfBytesWritten = NULL; // Fuck you MSVC.
-		WriteProcessMemory(this->m_hTargetProcessHandle, (LPVOID)m_WriteAddress, (LPCVOID)m_WriteValue, m_WriteSize, &lpNumberOfBytesWritten);
-		return lpNumberOfBytesWritten;
-	}
-
 	// VirtualAllocEx implementation.
 	std::uintptr_t Process_t::Allocate(std::size_t m_AllocationSize, DWORD m_dProtectionType, bool m_bShouldTrack)
 	{
@@ -1653,7 +1616,7 @@ namespace chdr
 		return this->m_ModuleData.size() != 0;
 	}
 
-	std::uintptr_t Module_t::FindIDASignature(std::string_view m_szSignature)
+	Address_t Module_t::FindIDASignature(std::string_view m_szSignature)
 	{
 		static auto ToBytes = [](std::string_view m_szSignature) {
 			std::vector<int> byteArray = {};
@@ -1677,7 +1640,7 @@ namespace chdr
 
 		if (!m_dModuleSize || !IsValid()) {
 			CH_LOG("Invalid module provided.");
-			return uintptr_t();
+			return Address_t();
 		}
 
 		// can't be ByteArray_t type because of wildcards.
@@ -1697,11 +1660,11 @@ namespace chdr
 			}
 
 			if (bFound)
-				return CH_R_CAST<uintptr_t>(&m_ModuleData[i]);
+				return Address_t(&m_ModuleData[i]);
 		}
 
 		CH_LOG("Couldn't find IDA signature %s.", m_szSignature.data());
-		return uintptr_t();
+		return Address_t();
 	}
 }
 

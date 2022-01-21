@@ -44,6 +44,7 @@ namespace chdr
 	class Driver_t;
 
 	class Module_t;
+	class Address_t;
 
 	// For easy and organized PE header parsing.
 	class PEHeaderData_t
@@ -247,7 +248,7 @@ namespace chdr
 		bool IsValid();
 
 		// Helper function to find some bytes in the module data.
-		std::uintptr_t FindIDASignature(std::string_view m_szSignature);
+		Address_t FindIDASignature(std::string_view m_szSignature);
 	};
 
 	class Thread_t
@@ -613,20 +614,36 @@ namespace chdr
 		std::uintptr_t GetRemoteProcAddress(const char* m_szModuleName, const char* m_szExportName);
 
 		// ReadProcessMemory implementation.
-		template <class T>
-		T Read(std::uintptr_t m_ReadAddress);
+		template <class T> T Read(std::uintptr_t m_ReadAddress) 
+		{
+			T m_pOutputRead;
+			ReadProcessMemory(this->m_hTargetProcessHandle, (LPCVOID)m_ReadAddress, &m_pOutputRead, sizeof(T), nullptr);
+			return m_pOutputRead;
+		}
 
 		// ReadProcessMemory implementation - allows byte arrays.
-		template <typename S>
-		std::size_t Read(std::uintptr_t m_ReadAddress, S m_pBuffer, std::size_t m_nBufferSize);
+		template <typename S> std::size_t Read(std::uintptr_t m_ReadAddress, S m_pBuffer, std::size_t m_nBufferSize) 
+		{
+			SIZE_T m_nBytesRead = 0u;
+			ReadProcessMemory(this->m_hTargetProcessHandle, (LPCVOID)m_ReadAddress, m_pBuffer, m_nBufferSize, &m_nBytesRead);
+			return m_nBytesRead;
+		}
 
 		// WriteProcessMemory implementation.
-		template<typename S>
-		std::size_t Write(std::uintptr_t m_WriteAddress, S m_WriteValue);
+		template <typename S> std::size_t Write(std::uintptr_t m_WriteAddress, S m_WriteValue) 
+		{
+			SIZE_T lpNumberOfBytesWritten = NULL; // Fuck you MSVC.
+			WriteProcessMemory(this->m_hTargetProcessHandle, (LPVOID)m_WriteAddress, (LPCVOID)m_WriteValue, sizeof(S), &lpNumberOfBytesWritten);
+			return lpNumberOfBytesWritten;
+		}
 
 		// WriteProcessMemory implementation.
-		template<typename S>
-		std::size_t Write(std::uintptr_t m_WriteAddress, S m_WriteValue, std::size_t m_WriteSize);
+		template <typename S> std::size_t Write(std::uintptr_t m_WriteAddress, S m_WriteValue, std::size_t m_WriteSize) 
+		{
+			SIZE_T lpNumberOfBytesWritten = NULL; // Fuck you MSVC.
+			WriteProcessMemory(this->m_hTargetProcessHandle, (LPVOID)m_WriteAddress, (LPCVOID)m_WriteValue, m_WriteSize, &lpNumberOfBytesWritten);
+			return lpNumberOfBytesWritten;
+		}
 
 		// VirtualAllocEx implementation.
 		std::uintptr_t Allocate(std::size_t m_AllocationSize, DWORD m_dProtectionType, bool m_bShouldTrack = true);
@@ -642,6 +659,85 @@ namespace chdr
 
 		// GetModule implementation.
 		Module_t& GetModule(const char* m_szModuleName, std::int32_t m_ParseType = PEHeaderData_t::PEHEADER_PARSING_TYPE::TYPE_ALL);
+	};
+
+	// Address helper class
+	class Address_t 
+	{
+	private:
+		uintptr_t m_dAddress = NULL;
+	public:
+		Address_t() { };
+
+		// Templated ctor.
+		template <class T> Address_t(const T m_Address) 
+		{
+			m_dAddress = CH_R_CAST<std::uintptr_t>(m_Address);
+		}
+
+		// Operator.
+		bool operator==(const Address_t& m_Address) const 
+		{
+			return m_dAddress == m_Address.Get<uintptr_t>();
+		}
+
+		// Operator.
+		bool operator!=(const Address_t& m_Address) const 
+		{
+			return m_dAddress != m_Address.Get<uintptr_t>();
+		}
+
+		// Getter.
+		template <class T> T Get() const 
+		{
+			return m_dAddress ? T(m_dAddress) : T();
+		}
+
+		// Dereferences one time and casts.
+		template <class T> T& To() 
+		{
+			return *CH_R_CAST<T*>(m_dAddress);
+		}
+
+		// Offset current address. 
+		template <class T> T Offset(std::ptrdiff_t m_Offset) 
+		{
+			return m_dAddress ? CH_R_CAST<T>(m_dAddress + m_Offset) : T();
+		}
+
+		// Dereferences address X times.
+		template <class T> T Deref(std::size_t m_nCount) 
+		{
+			if (!m_dAddress) {
+				CH_LOG("Invalid address called @Address_t::Deref.");
+				return T();
+			}
+
+			std::uintptr_t m_Address = m_dAddress;
+			while (m_nCount--)
+				if (m_Address)
+					m_Address = *CH_R_CAST<uintptr_t*>(m_Address);
+
+			return CH_R_CAST<T>(m_Address);
+		}
+
+		// Follows relative jmp. - E8 
+		template <class T> T Relative(std::ptrdiff_t m_Offset) 
+		{
+			if (!m_dAddress) {
+				CH_LOG("Invalid address called @Address_t::Relative.");
+				return T();
+			}
+
+			const std::uintptr_t m_Address = m_dAddress + m_Offset;
+			const std::ptrdiff_t m_RelativeOffset = *CH_R_CAST<std::ptrdiff_t*>(m_Address);
+			if (!m_RelativeOffset) {
+				CH_LOG("Invalid relative offset @Address_t::Relative.");
+				return T();
+			}
+
+			return CH_R_CAST<T>(m_Address + m_RelativeOffset + sizeof(uint32_t));
+		}
 	};
 
 	namespace math
